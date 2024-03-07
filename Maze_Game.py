@@ -6,7 +6,6 @@ import csv
 from datetime import datetime
 import pylsl
 import json
-from mutagen.wavpack import WavPack
 import wave
 
 # Initialize LSL Stream

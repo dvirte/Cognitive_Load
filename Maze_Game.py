@@ -7,6 +7,7 @@ import csv
 from datetime import datetime
 from create_maze import maze_to_ndarray
 import pylsl
+import json
 
 # Initialize LSL Stream
 outlet = pylsl.StreamOutlet(pylsl.StreamInfo("MyTriggerStream", "Markers", 1, 0, pylsl.cf_int32, "myuidw43536"))
@@ -70,8 +71,8 @@ def draw_text(surface, text, position, font_size=32, color=(255, 255, 255), cent
     surface.blit(text_surface, text_rect)
 
 
-def input_screen():
-    user_details = {'Serial Number': '', 'Age': '', 'Gender': 'Male'}
+def input_screen_old():
+    user_details = {'Serial Number': ''}
     current_input = 'Serial Number'
     input_active = True
 
@@ -106,6 +107,36 @@ def input_screen():
         pygame.time.Clock().tick(30)
 
 
+def input_screen():
+    user_details = {'Serial Number': ''}
+    current_input = 'Serial Number'
+    input_active = True
+
+    while True:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return None
+            if event.type == pygame.KEYDOWN:
+                if input_active:
+                    if event.key == pygame.K_RETURN:
+                        # Once the serial number is entered and RETURN is pressed, return user details
+                        return user_details
+                    elif event.key == pygame.K_BACKSPACE:
+                        # Allow user to backspace if they make a mistake
+                        user_details[current_input] = user_details[current_input][:-1]
+                    else:
+                        # Add the character to the serial number
+                        user_details[current_input] += event.unicode
+
+        screen.fill((0, 0, 0))  # Clear screen with black
+        draw_text(screen, "Enter Participant Serial Number", (320, 50), center=True)
+        draw_text(screen, "and then press Enter", (320, 80), center=True)
+        draw_text(screen, f"Serial Number: {user_details['Serial Number']}", (320, 200), center=True)
+
+        pygame.display.flip()
+        pygame.time.Clock().tick(30)
+
+
 def welcome_screen(screen):
     running = True
     while running:
@@ -128,7 +159,6 @@ def welcome_screen(screen):
 
 
 def instruction_screen(screen, n_back_level, animal_sound):
-
     # Log event for the start of the N-BACK Instructions
     log_event(7, datetime.now().timestamp())
     screen.fill((0, 0, 0))  # Clear screen
@@ -208,7 +238,7 @@ def nasa_tlx_rating_screen():
 
     # Define screen properties
     screen_width = 800
-    screen_height  = 600
+    screen_height = 600
     screen = pygame.display.set_mode((screen_width, screen_height))
     pygame.display.set_caption("NASA-TLX Rating")
     title_font = pygame.font.Font(None, 32)  # Larger font for the title
@@ -223,40 +253,64 @@ def nasa_tlx_rating_screen():
     GREEN = (0, 255, 0)
 
     # Categories and initial scale values
-    categories = ["Mental Demand", "Physical Demand", "Temporal Demand", "Performance", "Effort", "Frustration"]
+    categories = ["Mental Demand", "Performance", "Frustration"]
     scale_values = {category: 10 for category in categories}  # Mid-point of the scale
 
     # Title
     title = "NASA-TLX Rating"
 
     def draw_scales():
-        # Draw title
+        # Draw title at the original position
         title_surface = title_font.render(title, True, WHITE)
         screen.blit(title_surface, (screen_width // 2 - title_surface.get_width() // 2, 10))
 
+        # Calculate the vertical centering for the scales
+        total_content_height = len(categories) * 80  # Assuming 80 pixels per category
+        start_y_position = (screen_height - total_content_height) // 2
+
+        # Center the scales horizontally
         for i, category in enumerate(categories):
-            y_position = 60 + i * 80  # Reduced spacing between scales
+            y_position = start_y_position + i * 80  # Spacing between questions
             text_label = small_font.render(category, True, WHITE)
-            screen.blit(text_label, (50, y_position))
 
-            # Scale position and labels
-            pygame.draw.line(screen, WHITE, (150, y_position + 30), (650, y_position + 30), 2)
-            # Adjust the scale's marker calculation for 20 positions
-            scale_marker_pos = 150 + (scale_values[category] * (500 / 19))
-            pygame.draw.circle(screen, GREEN, (int(scale_marker_pos), y_position + 30), 10)
+            # Find the center of the text label relative to the screen width
+            text_x_position = screen_width // 2 - text_label.get_width() // 2
+            screen.blit(text_label, (text_x_position, y_position))
 
-            # Scale labels
+            # Draw the scale line centered
+            line_start_x = screen_width // 2 - 250  # Line starting position adjusted for centering
+            line_end_x = screen_width // 2 + 250  # Line ending position adjusted for centering
+            pygame.draw.line(screen, WHITE, (line_start_x, y_position + 30), (line_end_x, y_position + 30), 2)
+
+            # Calculate the position for the scale marker based on the current scale value
+            marker_pos_x = line_start_x + (scale_values[category] * (500 / 19))
+            pygame.draw.circle(screen, GREEN, (int(marker_pos_x), y_position + 30), 10)
+
+            # Place "Very Low" and "Very High" labels at the ends of the scale line
             low_text = small_font.render("Very Low", True, WHITE)
             high_text = small_font.render("Very High", True, WHITE)
-            screen.blit(low_text, (150, y_position + 50))
-            screen.blit(high_text, (650 - high_text.get_width(), y_position + 50))
+
+            # Draw the "Very Low" and "Very High" text aligned with the scale line ends
+            screen.blit(low_text, (line_start_x, y_position + 50))
+            screen.blit(high_text, (line_end_x - high_text.get_width(), y_position + 50))
 
     def handle_mouse_click(pos):
+
+        # Calculate the vertical centering for the scales
+        total_content_height = len(categories) * 80  # Assuming 80 pixels per category
+        start_y_position = (screen_height - total_content_height) // 2
+
         for i, category in enumerate(categories):
-            y_position = 60 + i * 80  # Matched to draw_scales
-            if 150 <= pos[0] <= 650 and (y_position + 10) <= pos[1] <= (y_position + 50):
-                # Correct the scale's marker calculation for 20 positions
-                scale_values[category] = round((pos[0] - 150) / (500 / 19))
+            y_position = start_y_position + i * 80  # Ensure this matches the draw_scales logic
+            line_start_x = screen_width // 2 - 250  # Line starting position adjusted for centering
+            line_end_x = screen_width // 2 + 250  # Line ending position adjusted for centering
+
+            # The clickable area for each scale
+            clickable_area_start_y = y_position + 20  # Slightly above the line
+            clickable_area_end_y = y_position + 40  # Slightly below the line
+
+            if line_start_x <= pos[0] <= line_end_x and clickable_area_start_y <= pos[1] <= clickable_area_end_y:
+                scale_values[category] = round((pos[0] - line_start_x) / (500 / 19))
                 return
 
     # Position and draw the "Continue" button
@@ -297,6 +351,19 @@ def play_sound(sound_info):
     sound_sequence.append(sound_info['filename'])  # Use a unique identifier for the sound
 
 
+def load_maze_from_file(dim):
+    """
+    Load a random maze from the pre-generated files based on dimension.
+    """
+    dir_path = f'ready_maze/dim{dim}'
+    maze_files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
+    random_maze_file = random.choice(maze_files)
+    maze_path = os.path.join(dir_path, random_maze_file)
+    with open(maze_path, 'r') as file:
+        maze_array = json.load(file)
+    return np.array(maze_array)  # Convert back to a numpy array if needed
+
+
 def setup_level(n_back_level, screen_width, screen_height):
     global experiment_ended, maze_size, maze_complexity, animal_sound, level_list, stage_performance
 
@@ -308,7 +375,7 @@ def setup_level(n_back_level, screen_width, screen_height):
         errors = analyze_performance()
         stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': errors,
                                   'n_back_level': n_back_level, 'maze_size': maze_size,
-                                  'maze_complexity': maze_complexity, 'animal_sound': animal_sound})
+                                  'animal_sound': animal_sound})
         print(f"Performance error: {errors}")
 
         # Criteria for performance evaluation
@@ -326,7 +393,6 @@ def setup_level(n_back_level, screen_width, screen_height):
                 maze_size += 5
                 level_list[1] = 1
             elif level_list[2] == 0:  # Increase the maze complexity
-                maze_complexity = min(0.05+maze_complexity, 1)
                 level_list[2] = 1
             else:
                 animal_sound = True
@@ -335,8 +401,11 @@ def setup_level(n_back_level, screen_width, screen_height):
             # send trigger to indicate that the subject has high error rates
             log_event(10, datetime.now().timestamp())
 
-    # Generate the new level's maze with updated parameters
-    maze = maze_to_ndarray(maze_size, 6, maze_complexity)
+    # # Generate the new level's maze with updated parameters
+    # maze = maze_to_ndarray(maze_size, 6, maze_complexity)
+
+    # Adjusted code to load the maze instead of generating a new one
+    maze = load_maze_from_file(maze_size)
 
     # Calculate the size of each cell to fit the screen
     maze_width = maze.shape[1]
@@ -350,7 +419,6 @@ def setup_level(n_back_level, screen_width, screen_height):
     # Create the maze background for the new level
     maze_background = create_maze_background(maze, cell_size)
 
-    print("new level\n\n")
     return maze, n_back_level, screen_width, screen_height, cell_size, maze_background
 
 
@@ -453,8 +521,8 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
     error_file_path = os.path.join(folder_name, 'stage_performance.csv')
     with open(error_file_path, 'w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=['timestamp', 'error_rate', 'n_back_level', 'maze_size',
-                                                  'maze_complexity', 'animal_sound', 'Mental Demand', 'Physical Demand',
-                                                  'Temporal Demand', 'Performance', 'Effort', 'Frustration'])
+                                                  'animal_sound', 'Mental Demand',
+                                                  'Performance', 'Frustration'])
         writer.writeheader()
         for data in stage_performance:
             writer.writerow(data)
@@ -485,7 +553,6 @@ experiment_start_time = datetime.now()  # Track the start time of the experiment
 # Initialize the screen
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Maze experiment")
-
 
 # Show welcome screen
 if not welcome_screen(screen):

@@ -2,6 +2,9 @@ import numpy as np
 from pyamaze import maze
 import matplotlib.pyplot as plt
 from collections import deque
+import os
+import random
+import json
 
 
 def bfs(maze, start, end):
@@ -34,7 +37,7 @@ def bfs(maze, start, end):
     return -1
 
 
-def dfs(maze, start, end, visited=None, path_length=0, shortest_path=[float('inf')]):
+def dfs_old(maze, start, end, visited=None, path_length=0, shortest_path=[float('inf')]):
     if visited is None:
         visited = set()
 
@@ -49,7 +52,7 @@ def dfs(maze, start, end, visited=None, path_length=0, shortest_path=[float('inf
     for dx, dy in directions:
         nx, ny = x + dx, y + dy
         if maze.shape[0] > nx >= 0 == maze[nx, ny] and 0 <= ny < maze.shape[1] and (nx, ny) not in visited:
-            dfs(maze, (nx, ny), end, visited, path_length+1, shortest_path)
+            dfs(maze, (nx, ny), end, visited, path_length + 1, shortest_path)
 
     visited.remove(start)  # Remove current cell from visited set to allow other paths
 
@@ -57,14 +60,33 @@ def dfs(maze, start, end, visited=None, path_length=0, shortest_path=[float('inf
         return shortest_path[0] if shortest_path[0] != float('inf') else -1
 
 
+def dfs(maze, start, end):
+    stack = [(start, 0)]  # (position, distance)
+    visited = set()
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    while stack:
+        (x, y), dist = stack.pop()
+        if (x, y) == end:
+            return dist
+        if (x, y) not in visited:
+            visited.add((x, y))
+            for dx, dy in directions:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < maze.shape[0] and 0 <= ny < maze.shape[1] and maze[nx, ny] == 0:
+                    stack.append(((nx, ny), dist + 1))
+
+    return -1  # If no path is found
+
+
 def add_holes_and_increase_complexity(maze_array, max_holes=4, prob=1):
     rows, cols = maze_array.shape
     entrance = (1, 0)
-    exit_path = (rows - 2, cols-1)
+    exit_path = (rows - 2, cols - 1)
     original_length = dfs(maze_array, entrance, exit_path)
 
     holes_added = 0
-    wall_positions = [(r, c) for r in range(2, rows - 2, 2) for c in range(2, cols - 2, 2) if maze_array[r, c] == 1]
+    wall_positions = [(r, c) for r in range(1, rows - 1) for c in range(1, cols - 1) if maze_array[r, c] == 1]
     while holes_added < max_holes:
 
         # Randomly select a wall (1) that is not on the perimeter
@@ -75,9 +97,10 @@ def add_holes_and_increase_complexity(maze_array, max_holes=4, prob=1):
 
         # Check id square is formed by walls
         for dr, dc in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:  # Diagonal directions
-            if row+dr < 0 or row+dr >= rows or col+dc < 0 or col+dc >= cols:
+            if row + dr < 0 or row + dr >= rows or col + dc < 0 or col + dc >= cols:
                 continue
-            if maze_array[row+dr, col] == 0 and maze_array[row, col+dc] == 0 and maze_array[row+dr, col+dc] == 0:
+            if maze_array[row + dr, col] == 0 and maze_array[row, col + dc] == 0 and maze_array[
+                row + dr, col + dc] == 0:
                 # remove wall from list of candidates and go back th while loop
                 wall_positions.remove((row, col))
                 stop = True
@@ -90,9 +113,9 @@ def add_holes_and_increase_complexity(maze_array, max_holes=4, prob=1):
         # Check if the wall have more than 1 neighbor:
         neighbors = 0
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            if row+dr < 0 or row+dr >= rows or col+dc < 0 or col+dc >= cols:
+            if row + dr < 0 or row + dr >= rows or col + dc < 0 or col + dc >= cols:
                 continue
-            if maze_array[row+dr, col+dc] == 0:
+            if maze_array[row + dr, col + dc] == 0:
                 neighbors += 1
         if neighbors < 2:
             wall_positions.remove((row, col))
@@ -102,7 +125,7 @@ def add_holes_and_increase_complexity(maze_array, max_holes=4, prob=1):
         maze_array[row, col] = 0
         new_length = dfs(maze_array, entrance, exit_path)
 
-        if new_length <= original_length*prob:
+        if new_length < original_length:
             maze_array[row, col] = 1  # Revert if no increase in complexity
             wall_positions.remove((row, col))
         else:
@@ -112,23 +135,43 @@ def add_holes_and_increase_complexity(maze_array, max_holes=4, prob=1):
     return maze_array
 
 
-def remove_path_and_increase_complexity(maze_array):
+def remove_path_and_increase_complexity(maze_array, max_holes=4):
     rows, cols = maze_array.shape
     entrance = (1, 0)
     exit_path = (rows - 2, cols - 1)
-    original_length = bfs(maze_array, entrance, exit_path)
+    original_length = dfs(maze_array, entrance, exit_path)
 
-    while not path_cells:
+    holes_added = 0
+    path_cells = [(r, c) for r in range(1, rows - 1) for c in range(1, cols - 1) if maze_array[r, c] == 0]
+
+    while holes_added < max_holes:
+        # If no path cells are left, break
+        if not path_cells:
+            break
+
         # Randomly select a cell from the path
-        path_cells = [(r, c) for r in range(1, rows - 1) for c in range(1, cols - 1) if maze_array[r, c] == 0]
         row, col = path_cells[np.random.randint(len(path_cells))]
 
         # Remove cell from path
         maze_array[row, col] = 1
-        new_length = bfs(maze_array, entrance, exit_path)
+        new_length = dfs(maze_array, entrance, exit_path)
 
-        if new_length >= original_length:
-            original_length = new_length  # Update path length for next iteration
+        if new_length > original_length:
+            passed = True
+            # Check the four neighbors of the cell still accessible to the path
+            neighbors = [(row - 1, col), (row + 1, col), (row, col - 1), (row, col + 1)]
+            for r, c in neighbors:
+                if maze_array[r, c] == 0:
+                    dfs_val = dfs(maze_array, (r, c), exit_path)
+                    if dfs_val == -1 or dfs_val is None:
+                        maze_array[row, col] = 0
+                        passed = False
+                        break
+
+            # If path length increases, update original_length and continue
+            if passed:
+                original_length = new_length  # Update path length for next iteration
+                holes_added += 1
         else:
             maze_array[row, col] = 0  # Revert if no increase in complexity
 
@@ -139,7 +182,6 @@ def remove_path_and_increase_complexity(maze_array):
 
 
 def maze_to_ndarray(dim, max_holes, prob):
-
     # Create a maze using pyamaze
     m = maze(dim, dim)
     m.CreateMaze()
@@ -167,12 +209,13 @@ def maze_to_ndarray(dim, max_holes, prob):
     arr[1, 0] = 0
     arr[-2, -1] = 0
 
-    add_holes_and_increase_complexity(arr, max_holes, prob)
+    arr = add_holes_and_increase_complexity(arr, max_holes, prob)
+    arr = remove_path_and_increase_complexity(arr)
 
     return arr
 
 
-def draw_maze(maze, path=None):
+def draw_maze(maze, path=None, save_path=None):
     fig, ax = plt.subplots(figsize=(10, 10))
 
     # Set the border color to white
@@ -194,4 +237,40 @@ def draw_maze(maze, path=None):
     ax.arrow(0, 1, .4, 0, fc='green', ec='green', head_width=0.3, head_length=0.3)
     ax.arrow(maze.shape[1] - 1, maze.shape[0] - 2, 0.4, 0, fc='blue', ec='blue', head_width=0.3, head_length=0.3)
 
-    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path, format='png')
+
+    # plt.show()
+
+
+if __name__ == '__main__':
+    # Create "ready_maze" folder if it doesn't exist
+    if not os.path.exists('ready_maze'):
+        os.makedirs('ready_maze')
+
+    # Generate mazes
+    for dim in range(5, 51, 5):
+        dir_path = f'ready_maze/dim{dim}'
+
+        # Ensure the sub-folder exists
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+
+        mazes_set = set()  # Use a set to store unique mazes for comparison
+        count = 0
+        while count < 20:
+            maze_array = maze_to_ndarray(dim, 6, 1)
+            maze_str = json.dumps(maze_array.tolist())  # Convert the maze to a string format for easy comparison
+
+            # Only proceed if the maze is unique
+            if maze_str not in mazes_set:
+                mazes_set.add(maze_str)
+                # Save the unique maze to file
+                with open(f'{dir_path}/maze_{count}.json', 'w') as f:
+                    f.write(maze_str)
+                print(f'{dir_path}/maze_{count}.json')
+                draw_maze(maze_array, save_path=f'{dir_path}/maze_{count}.png')
+                count += 1
+
+
+

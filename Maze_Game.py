@@ -2,12 +2,12 @@ import pygame
 import os
 import random
 import numpy as np
-import pandas as pd
 import csv
 from datetime import datetime
-from create_maze import maze_to_ndarray
 import pylsl
 import json
+from mutagen.wavpack import WavPack
+import wave
 
 # Initialize LSL Stream
 outlet = pylsl.StreamOutlet(pylsl.StreamInfo("MyTriggerStream", "Markers", 1, 0, pylsl.cf_int32, "myuidw43536"))
@@ -220,13 +220,23 @@ def create_maze_background(maze, cell_size):
     return maze_background
 
 
+def get_sound_duration(file_path):
+    with wave.open(file_path, 'rb') as wav_file:  # Open the WAV file in read-binary mode
+        frames = wav_file.getnframes()
+        rate = wav_file.getframerate()
+        duration = frames / float(rate)
+    return int(duration * 1000)  # Convert to milliseconds
+
+
 def load_sounds(folder, sound_type):
     sounds = []
     for filename in os.listdir(folder):
         if filename.endswith('.wav'):  # Adjust the format as needed
             path = os.path.join(folder, filename)
             sound = pygame.mixer.Sound(path)
-            sound_info = {'sound': sound, 'type': sound_type, 'filename': filename}
+            duration = get_sound_duration(path)
+            sound_info = {'sound': sound, 'type': sound_type,
+                          'filename': filename, 'duration': duration}
             sounds.append(sound_info)
     return sounds
 
@@ -349,6 +359,7 @@ def play_sound(sound_info):
     global sound_sequence
     pygame.mixer.Sound.play(sound_info['sound'])
     sound_sequence.append(sound_info['filename'])  # Use a unique identifier for the sound
+    return sound_info['duration']
 
 
 def load_maze_from_file(dim):
@@ -538,10 +549,10 @@ sound_sequence = []  # Reset for the new level
 pygame.init()
 
 # Timers and intervals
-initial_delay = 1000  # 1-second delay before the first sound
-sound_interval = 500  # 0.5 seconds between sounds
-initial_timer = 0
-interval_timer = 0
+sound_to_play_next = True
+time_since_last_sound = 0
+sound_duration = 0  # Duration of the current sound
+post_sound_delay = 500  # 0.5 seconds delay after the sound ends
 
 # Screen dimensions (constant size)
 screen_width = 600
@@ -672,12 +683,19 @@ while running:
     # Sound playback logic
     if n_back_level > 0:
         delta_time = pygame.time.Clock().tick(30)
-        if initial_timer < initial_delay:
-            initial_timer += delta_time
-        else:
-            interval_timer += delta_time
+        if sound_to_play_next:
+            time_since_last_sound += delta_time
+            # Wait for the post-sound delay to elapse before playing the next sound
+            if time_since_last_sound >= sound_duration + post_sound_delay:
+                chosen_list = random.choice([object_sounds, animal_sounds])
+                chosen_sound_info = random.choice(chosen_list)
+                sound_duration = play_sound(chosen_sound_info)  # play_sound now returns the duration
+                time_since_last_sound = 0  # Reset the timer
+                sound_to_play_next = False  # Indicate that a sound is currently playing
 
-        if initial_timer >= initial_delay and interval_timer >= sound_interval:
+        if not pygame.mixer.get_busy():
+            # If no sound is currently playing, prepare to play the next sound
+            sound_to_play_next = True
 
             # Check if the player's response is correct
             if expected_response and not response_made:
@@ -699,7 +717,6 @@ while running:
                 elif chosen_sound_info['type'] == 'animal':
                     expected_response = True
 
-            interval_timer = 0  # Reset the interval timer
             response_made = False  # Reset response flag for the new interval
 
     # Draw the player

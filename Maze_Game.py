@@ -538,8 +538,8 @@ sound_sequence = []  # Reset for the new level
 pygame.init()
 
 # Timers and intervals
-initial_delay = 1500  # 1.5 seconds before the first sound
-sound_interval = 2000  # 2 seconds between sounds
+initial_delay = 1000  # 1-second delay before the first sound
+sound_interval = 500  # 0.5 seconds between sounds
 initial_timer = 0
 interval_timer = 0
 

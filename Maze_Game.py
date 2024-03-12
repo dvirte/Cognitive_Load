@@ -357,7 +357,7 @@ def nasa_tlx_rating_screen():
 def play_sound(sound_info):
     global sound_sequence
     pygame.mixer.Sound.play(sound_info['sound'])
-    sound_sequence.append(sound_info['filename'])  # Use a unique identifier for the sound
+    sound_sequence.append(sound_info)  # Use a unique identifier for the sound
     return sound_info['duration']
 
 
@@ -548,10 +548,12 @@ sound_sequence = []  # Reset for the new level
 pygame.init()
 
 # Timers and intervals
-sound_to_play_next = True
-time_since_last_sound = 0
-sound_duration = 0  # Duration of the current sound
+time_since_last_sound = 0  # Time elapsed since the last sound played
+sound_duration = 0  # Duration of the currently playing sound
+sound_end_time = 0  # The calculated end time for the current sound
 post_sound_delay = 500  # 0.5 seconds delay after the sound ends
+sound_to_play_next = True  # Flag to control when the next sound can be played
+
 
 # Screen dimensions (constant size)
 screen_width = 600
@@ -662,8 +664,10 @@ while running:
             # Determine correctness and log event
             if expected_response:  # If a response was expected
                 log_event(2, datetime.now().timestamp())  # Correct response, Trigger ID 2
+                print("correct response")
             else:
                 log_event(1, datetime.now().timestamp())  # Incorrect response, Trigger ID 1
+                print("incorrect response")
             expected_response = False  # Reset for the next sound
 
     # Blit the maze background
@@ -681,36 +685,27 @@ while running:
 
     # Sound playback logic
     if n_back_level > 0:
-        delta_time = pygame.time.Clock().tick(30)
-        if sound_to_play_next:
-            time_since_last_sound += delta_time
-            # Wait for the post-sound delay to elapse before playing the next sound
-            if time_since_last_sound >= sound_duration + post_sound_delay:
-                chosen_list = random.choice([object_sounds, animal_sounds])
-                chosen_sound_info = random.choice(chosen_list)
-                sound_duration = play_sound(chosen_sound_info)  # play_sound now returns the duration
-                time_since_last_sound = 0  # Reset the timer
-                sound_to_play_next = False  # Indicate that a sound is currently playing
+        current_time = pygame.time.get_ticks()
+        if current_time >= sound_end_time:
 
-        if not pygame.mixer.get_busy():
-            # If no sound is currently playing, prepare to play the next sound
-            sound_to_play_next = True
-
-            # Check if the player's response is correct
+            # Check if the player's missed the response
             if expected_response and not response_made:
                 log_event(3, datetime.now().timestamp())  # Log missed response
+                print("missed response")
                 expected_response = False  # Reset for the next interval
 
-            # # Randomly choose a sound list and then a sound from that list
-            # chosen_list = random.choice([object_sounds, animal_sounds])
+            # Play the next sound
+            if random.randint(1, 100) <= 40 and len(sound_sequence) >= n_back_level + 1:
+                chosen_sound_info = sound_sequence[-n_back_level - 1]
+            else:
+                chosen_list = random.choice([object_sounds, animal_sounds])
+                chosen_sound_info = random.choice(chosen_list)
+            sound_duration = play_sound(chosen_sound_info)
+            sound_end_time = pygame.time.get_ticks() + sound_duration + post_sound_delay
 
-            # Randomly choose a sound list and then a sound from that list
-            chosen_list = random.choice([object_sounds, animal_sounds])
-            chosen_sound_info = random.choice(chosen_list)  # This is a dictionary
-            play_sound(chosen_sound_info)  # Updated to use play_sound
             # Determine if this sound requires a response based on N-BACK rule
             if (len(sound_sequence) >= n_back_level + 1 and
-                    sound_sequence[-n_back_level - 1] == chosen_sound_info['filename']):
+                    sound_sequence[-n_back_level - 1]['filename'] == chosen_sound_info['filename']):
                 if not animal_sound:
                     expected_response = True  # A response is expected for this sound
                 elif chosen_sound_info['type'] == 'animal':

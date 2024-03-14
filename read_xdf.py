@@ -22,3 +22,5 @@ for stream in streams:
     time_stamps.append(stream['time_stamps'])
     time_series.append(stream['time_series'])
     name.append(stream['info']['name'])
+
+print(info)

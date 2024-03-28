@@ -7,9 +7,10 @@ from datetime import datetime
 import pylsl
 import json
 import wave
+import winsound
 
 # Initialize LSL Stream
-outlet = pylsl.StreamOutlet(pylsl.StreamInfo("MyTriggerStream", "Markers", 1, 0, pylsl.cf_int32, "myuidw43536"))
+outlet = pylsl.StreamOutlet(pylsl.StreamInfo("Trigger_Cog", "Markers", 1, 0, pylsl.cf_int32, "myuidw43536"))
 
 # Initialize Pygame and the mixer
 pygame.init()
@@ -32,6 +33,12 @@ pygame.mixer.init()
 #    10: 'Indicates when the subject has high error rates'
 #    11: 'Indicates start of the NASA-TLX rating'
 #    12: 'Indicates end of the NASA-TLX rating'
+#    13: 'Indicates for calibration: start blinking'
+#    14: 'Indicates for calibration: start resting eyebrows'
+#    15: 'Indicates for calibration: start yawning'
+#    16: 'Indicates for calibration: start nodding negative'
+#    17: 'Indicates for calibration: start calibration'
+#    18: 'Indicates for calibration: end calibration'
 # }
 
 experiment_data = []  # Initialize an empty list to store event data
@@ -41,6 +48,8 @@ animal_sound = False  # The n-back task only takes into account if the sound pla
 level_list = [0, 0, 0]  # List to keep track of which aspect to increase next
 performance_ratios = {'TP': [], 'FP': [], 'start': [], 'end': []}  # Initialize performance ratios
 stage_performance = []  # Initialize list to store high error performance
+path_of_maze = [] # Initialize list to store the path of the maze
+baseline_maze = 0  # Play 10 levels of maze without any n-back task
 
 
 def log_event(trigger_id, timestamp):
@@ -50,6 +59,7 @@ def log_event(trigger_id, timestamp):
 
     # Send the trigger to the LSL stream
     outlet.push_sample([trigger_id])
+    print(f"Trigger {trigger_id}")
 
 
 def display_text(screen, text, position, font_size=50, color=(255, 255, 255)):
@@ -157,6 +167,70 @@ def welcome_screen(screen):
     return True
 
 
+def calibration_screen(screen):
+    # Define a function to display a slide with instructions
+    def display_calibration_instruction(instruction_text, start_trigger_id):
+        if start_trigger_id == 17:
+            log_event(start_trigger_id, datetime.now().timestamp())
+
+        # Text settings
+        font_size = 40  # Adjust font size for clarity and fit
+        font = pygame.font.Font(None, font_size)
+        color = (255, 255, 255)  # White color for text
+        line_spacing = 10  # Spacing between lines
+
+        # Clear the screen
+        screen.fill((0, 0, 0))
+        # Calculate the total height of the text block
+        total_height = (font_size + line_spacing) * len(instruction_text) - line_spacing
+        # Calculate the starting y position to vertically center the text
+        start_y = (screen_height - total_height) // 2
+
+        for i, text in enumerate(instruction_text):
+            text_surface = font.render(text, True, color)
+            rect = text_surface.get_rect(center=(screen_width // 2, start_y + i * (font_size + line_spacing)))
+            screen.blit(text_surface, rect)
+
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN:
+                        running = False
+            pygame.display.flip()
+
+        if start_trigger_id != 17:
+            # Display the action slide
+            screen.fill((0, 0, 0))  # Clear screen
+            display_text(screen, "Please wait for the beep.", (screen_width // 2, screen_height // 2))
+            pygame.display.flip()
+            pygame.time.wait(2500)  # Wait for 5 seconds
+
+            # Perform the actions with beep sounds and triggers
+            for _ in range(3):
+                # Play a beep sound
+                winsound.Beep(2500, 500)
+                log_event(start_trigger_id, datetime.now().timestamp())
+                pygame.time.wait(5000)  # Wait for 5 seconds
+
+    # Display the initial calibration instruction
+    display_calibration_instruction(
+        ["Now we will perform a calibration.", "Please press enter to continue"],
+        17)
+
+    # Calibration steps
+    calibration_steps = [
+        (["Every time a beep sound is heard,", "please blink.", "", "To start, press Enter."], 13),
+        (["Every time a beep sound is heard,", " please raise your eyebrows.", "", "To start, press enter."], 14),
+        (["Every time a beep sound is heard,", " please yawn.", "", "To start, press enter."], 15),
+        (["Every time a beep sound is heard,", " please nod negatively.", "", "To start, press enter."], 16)]
+
+    for instruction_text, start_trigger_id in calibration_steps:
+        display_calibration_instruction(instruction_text, start_trigger_id)
+
+    log_event(18, datetime.now().timestamp())
+
+
 def instruction_screen(screen, n_back_level, animal_sound):
     # Log event for the start of the N-BACK Instructions
     log_event(7, datetime.now().timestamp())
@@ -205,6 +279,9 @@ def instruction_screen(screen, n_back_level, animal_sound):
                 return False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 waiting_for_input = False
+
+    # Log event for the end of the N-BACK Instructions
+    log_event(8, datetime.now().timestamp())
 
     return True
 
@@ -262,7 +339,7 @@ def nasa_tlx_rating_screen():
     GREEN = (0, 255, 0)
 
     # Categories and initial scale values
-    categories = ["Mental Demand", "Performance", "Frustration"]
+    categories = ["Mental Demand", "Effort", "Performance", "Frustration"]
     scale_values = {category: 10 for category in categories}  # Mid-point of the scale
 
     # Title
@@ -348,10 +425,69 @@ def nasa_tlx_rating_screen():
         pygame.display.flip()
 
     # Add the scale values to the stage performance list as a dictionary
+    stage_performance.append({})
     for scale in categories:
         stage_performance[-1][scale] = scale_values[scale]
     # Log event for the end of the NASA-TLX rating
     log_event(12, datetime.now().timestamp())
+
+
+def calculate_nasa_weight():
+    screen = pygame.display.set_mode((800, 600))
+    pygame.display.set_caption("NASA-TLX Weight Calculation")
+
+    categories = ["Mental Demand", "Performance", "Effort", "Frustration"]
+    comparisons = [(i, j) for i in categories for j in categories if i < j]
+    results = {category: 0 for category in categories}
+    # shuffle the comparisons to avoid order bias
+    random.shuffle(comparisons)
+
+    try:
+        font = pygame.font.Font(None, 36)
+    except:
+        pygame.init()
+        font = pygame.font.Font(None, 36)
+    WHITE = (255, 255, 255)
+
+    def draw_option(text, position):
+        text_surface = font.render(text, True, WHITE)
+        rect = text_surface.get_rect(center=position)
+        screen.blit(text_surface, rect)
+        return rect
+
+    running = True
+    for comparison in comparisons:
+        if not running:
+            break
+
+        screen.fill((0, 0, 0))
+        question = "Which had a greater impact on your workload?"
+        draw_option(question, (400, 100))
+
+        comparison = [comparison[0], comparison[1]]
+        random.shuffle(comparison)
+
+        left_option = draw_option(comparison[0], (200, 300))
+        right_option = draw_option(comparison[1], (600, 300))
+
+        pygame.display.flip()
+
+        choosing = True
+        while choosing:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    choosing = False
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    mouse_pos = event.pos
+                    if left_option.collidepoint(mouse_pos):
+                        results[comparison[0]] += 1
+                        choosing = False
+                    elif right_option.collidepoint(mouse_pos):
+                        results[comparison[1]] += 1
+                        choosing = False
+
+    return results
 
 
 def play_sound(sound_info):
@@ -369,23 +505,29 @@ def load_maze_from_file(dim):
     maze_files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
     random_maze_file = random.choice(maze_files)
     maze_path = os.path.join(dir_path, random_maze_file)
+    path_of_maze.append(maze_path)
     with open(maze_path, 'r') as file:
         maze_array = json.load(file)
     return np.array(maze_array)  # Convert back to a numpy array if needed
 
 
 def setup_level(n_back_level, screen_width, screen_height):
-    global experiment_ended, maze_size, maze_complexity, animal_sound, level_list, stage_performance
+    global experiment_ended, maze_size, maze_complexity, animal_sound, \
+        level_list, stage_performance, baseline_maze, path_of_maze
 
-    if n_back_level == -1:
-        n_back_level += 1
-    else:
+    if baseline_maze < 12:
+        baseline_maze += 1
+        if baseline_maze > 10:
+            maze_size = 5
+        else:
+            maze_size = random.choice([5, 10, 15])
+    if baseline_maze > 1:
         # Analyze the latest performance from experiment_data
         # Placeholder for performance analysis logic
         errors = analyze_performance()
         stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': errors,
                                   'n_back_level': n_back_level, 'maze_size': maze_size,
-                                  'animal_sound': animal_sound})
+                                  'animal_sound': animal_sound, "path_of_maze": path_of_maze[-1]})
         print(f"Performance error: {errors}")
 
         # Criteria for performance evaluation
@@ -393,7 +535,7 @@ def setup_level(n_back_level, screen_width, screen_height):
         significant_drop_threshold = 0.8  # Example threshold for significant performance drop
 
         # Logic to decide on increasing difficulty or ending the experiment
-        if errors <= acceptable_error_threshold:
+        if errors <= acceptable_error_threshold and baseline_maze == 12:
             # Decide which aspect to increase: This is a simplified example; implement your own logic
             if level_list[0] == 0:  # Increase the N-back level
                 animal_sound = False
@@ -509,9 +651,13 @@ def is_maze_completed(player_x, player_y, maze):  # check if the player reached 
 
 
 def save_data_and_participant_info(experiment_data, user_details, stage_performance):
+    weights = calculate_nasa_weight()
     serial_number = user_details['Serial Number']
     folder_name = f"S{serial_number.zfill(3)}"
     os.makedirs(folder_name, exist_ok=True)
+
+    # Log event for the end of the game
+    log_event(5, datetime.now().timestamp())
 
     # Save experiment data
     csv_file_path = os.path.join(folder_name, 'experiment_data.csv')
@@ -531,11 +677,18 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
     error_file_path = os.path.join(folder_name, 'stage_performance.csv')
     with open(error_file_path, 'w', newline='') as file:
         writer = csv.DictWriter(file, fieldnames=['timestamp', 'error_rate', 'n_back_level', 'maze_size',
-                                                  'animal_sound', 'Mental Demand',
-                                                  'Performance', 'Frustration'])
+                                                  'path_of_maze', 'animal_sound', 'Mental Demand',
+                                                  'Performance', 'Effort', 'Frustration'])
         writer.writeheader()
         for data in stage_performance:
             writer.writerow(data)
+
+    # Save NASA-TLX weights
+    weights_file_path = os.path.join(folder_name, 'nasa_tlx_weights.csv')
+    with open(weights_file_path, 'w', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=weights.keys())
+        writer.writeheader()
+        writer.writerow(weights)
 
 
 # Load sounds from both folders
@@ -544,8 +697,8 @@ animal_sounds = load_sounds(os.path.join("back_sound", "sound_animal"), "animal"
 
 sound_sequence = []  # Reset for the new level
 
-# Initialize Pygame
-pygame.init()
+# # Initialize Pygame
+# pygame.init()
 
 # Timers and intervals
 time_since_last_sound = 0  # Time elapsed since the last sound played
@@ -553,7 +706,6 @@ sound_duration = 0  # Duration of the currently playing sound
 sound_end_time = 0  # The calculated end time for the current sound
 post_sound_delay = 500  # 0.5 seconds delay after the sound ends
 sound_to_play_next = True  # Flag to control when the next sound can be played
-
 
 # Screen dimensions (constant size)
 screen_width = 600
@@ -566,9 +718,9 @@ experiment_start_time = datetime.now()  # Track the start time of the experiment
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Maze experiment")
 
-# Show welcome screen
-if not welcome_screen(screen):
-    exit()
+# # Show welcome screen
+# if not welcome_screen(screen):
+#     exit()
 
 # Define the screen size
 screen_width = 640
@@ -578,7 +730,15 @@ screen = pygame.display.set_mode((screen_width, screen_height))
 # Initialize pygame
 pygame.display.set_caption("User Details Input")
 
-user_details = input_screen()
+# Get user details
+while True:
+    user_details = input_screen()
+    # check if user_details contain only numbers and its 3
+    if user_details is not None and user_details['Serial Number'].isdigit() and len(user_details['Serial Number']) == 3:
+        break
+
+# # Perform the calibration
+# calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze
@@ -611,7 +771,7 @@ key_pressed = None
 initial_screen_width = 600  # Initial screen dimensions
 initial_screen_height = 600
 maze, n_back_level, screen_width, screen_height, cell_size, maze_background = \
-    setup_level(-1, initial_screen_width, initial_screen_height)
+    setup_level(0, initial_screen_width, initial_screen_height)
 
 instruction_screen_set = pygame.display.set_mode((initial_screen_width, initial_screen_height))
 
@@ -729,8 +889,6 @@ while running:
         # Call the rating screen function after a maze is completed
         nasa_tlx_ratings = nasa_tlx_rating_screen()
         if experiment_ended:
-            # Log event for the end of the game
-            log_event(5, datetime.now().timestamp())
             # Save data before exiting after completing all levels
             save_data_and_participant_info(experiment_data, user_details, stage_performance)
             break  # End the game after the last level
@@ -743,9 +901,6 @@ while running:
         # Call the instruction screen with the updated window size
         if not instruction_screen(instruction_screen_set, n_back_level, animal_sound):
             exit()  # Exit if the user closes the window or presses ESCAPE
-
-        # Log event for the end of the N-BACK Instructions
-        log_event(8, datetime.now().timestamp())
 
         # Log event for the start of a new level
         log_event(4, datetime.now().timestamp())

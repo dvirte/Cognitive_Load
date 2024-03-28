@@ -32,7 +32,7 @@ class SubjectData:
         self.game_time_stamps = []
         self.data_by_type = {}
         self.data = self.load_data()
-        self.filtered_data = self.filter_data_emg()
+        self.filtered_data_emg = self.filter_data_emg()
 
     def load_data(self):
         # Load the XDF file
@@ -102,14 +102,14 @@ class SubjectData:
         # Filter the data
         order = 5
         fs = 250
-        low_cut = 10
-        high_cut = 100
+        low_cut = 0.5
+        high_cut = 35
         sos = signal.butter(order, [low_cut, high_cut], btype='band', fs=fs, output='sos')
         b_notch, a_notch = signal.iirnotch(50, 20, fs)
         filtered_data = {}
         for game in range(self.games_played):
-            filtered_data[game] = signal.sosfilt(sos, self.data[game]['ElectrodeStream']['time_series'])
-            filtered_data[game] = signal.filtfilt(b_notch, a_notch, filtered_data[game])
+            filtered_data[game] = signal.filtfilt(b_notch, a_notch, self.data[game]['ElectrodeStream']['time_series'])
+            filtered_data[game] = signal.sosfilt(sos, filtered_data[game])
         return filtered_data
 
     def show_data_emg(self, specific_game=[1], not_to_show=[0, 1, 2, 3, 4, 5, 6]):
@@ -135,4 +135,22 @@ if __name__ == "__main__":
                                           filetypes=(("xdf files", "*.xdf"), ("all files", "*.*")))
     root.destroy()
     subject_data = SubjectData(xdf_name)
-    subject_data.show_data_emg()
+
+    game_to_show = 1
+    subj_emg = subject_data.filtered_data_emg[game_to_show]
+    # each channel is plotted in a different subplot of 4X4
+    fig, axs = plt.subplots(4, 4, figsize=(15, 15))
+    for i in range(4):
+        for j in range(4):
+            axs[i, j].plot(subj_emg[:, i * 4 + j])
+            axs[i, j].set_title('Channel ' + str(i * 4 + j + 1))
+            axs[i, j].set_xlabel('Time (s)')
+            axs[i, j].set_ylabel('EMG (mV)')
+    plt.show()
+
+    plt.plot(subj_emg[0:1000, 4])
+    plt.title('Channel 5')
+    plt.xlabel('Time (s)')
+    plt.ylabel('EMG (mV)')
+    plt.show()
+print("Done")

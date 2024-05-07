@@ -43,6 +43,7 @@ pygame.mixer.init()
 
 experiment_data = []  # Initialize an empty list to store event data
 maze_size = 5  # Initial maze size
+current_threshold = 0.3  # Initial error threshold
 maze_complexity = 0.8  # Initial maze complexity
 animal_sound = False  # The n-back task only takes into account if the sound played is from animals and not inanimate
 level_list = [0, 0, 0]  # List to keep track of which aspect to increase next
@@ -78,42 +79,6 @@ def draw_text(surface, text, position, font_size=32, color=(255, 255, 255), cent
     else:
         text_rect.topleft = position
     surface.blit(text_surface, text_rect)
-
-
-def input_screen_old():
-    user_details = {'Serial Number': ''}
-    current_input = 'Serial Number'
-    input_active = True
-
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return None
-            if event.type == pygame.KEYDOWN:
-                if input_active:
-                    if event.key == pygame.K_RETURN:
-                        if current_input == 'Serial Number':
-                            current_input = 'Age'
-                        elif current_input == 'Age':
-                            current_input = 'Gender'
-                        else:
-                            return user_details  # Finished input
-                    elif event.key == pygame.K_BACKSPACE:
-                        user_details[current_input] = user_details[current_input][:-1]
-                    elif event.key == pygame.K_LEFT or event.key == pygame.K_RIGHT:
-                        user_details['Gender'] = 'Female' if user_details['Gender'] == 'Male' else 'Male'
-                    else:
-                        if current_input != 'Gender':  # Allow typing for non-gender fields
-                            user_details[current_input] += event.unicode
-
-        screen.fill((0, 0, 0))
-        draw_text(screen, "Enter User Details", (320, 50), center=True)
-        draw_text(screen, f"Serial Number: {user_details['Serial Number']}", (320, 150), center=True)
-        draw_text(screen, f"Age: {user_details['Age']}", (320, 200), center=True)
-        draw_text(screen, f"Gender: {user_details['Gender']} (Use Left/Right to change)", (320, 250), center=True)
-
-        pygame.display.flip()
-        pygame.time.Clock().tick(30)
 
 
 def input_screen():
@@ -215,15 +180,15 @@ def calibration_screen(screen):
 
     # Display the initial calibration instruction
     display_calibration_instruction(
-        ["Now we will perform a calibration.", "Please press enter to continue"],
+        ["Now we will perform a calibration.", "Please press Enter to continue"],
         17)
 
     # Calibration steps
     calibration_steps = [
         (["Every time a beep sound is heard,", "please blink.", "", "To start, press Enter."], 13),
-        (["Every time a beep sound is heard,", " please raise your eyebrows.", "", "To start, press enter."], 14),
-        (["Every time a beep sound is heard,", " please yawn.", "", "To start, press enter."], 15),
-        (["Every time a beep sound is heard,", " please nod negatively.", "", "To start, press enter."], 16)]
+        (["Every time a beep sound is heard,", " please raise your eyebrows.", "", "To start, press Enter."], 14),
+        (["Every time a beep sound is heard,", " please yawn.", "", "To start, press Enter."], 15),
+        (["Every time a beep sound is heard,", " please nod negatively.", "", "To start, press Enter."], 16)]
 
     for instruction_text, start_trigger_id in calibration_steps:
         display_calibration_instruction(instruction_text, start_trigger_id)
@@ -250,6 +215,7 @@ def instruction_screen(screen, n_back_level, animal_sound):
         instructions.append("If a sound is the same as one you heard ")
         instructions.append(f"{n_back_level} steps ago,")
         if animal_sound:
+            winsound.Beep(2500, 500)
             instructions.append("and!! it's an animal sound,")
             instructions.append("press SPACEBAR.")
         else:
@@ -424,8 +390,6 @@ def nasa_tlx_rating_screen():
 
         pygame.display.flip()
 
-    # Add the scale values to the stage performance list as a dictionary
-    stage_performance.append({})
     for scale in categories:
         stage_performance[-1][scale] = scale_values[scale]
     # Log event for the end of the NASA-TLX rating
@@ -515,27 +479,30 @@ def setup_level(n_back_level, screen_width, screen_height):
     global experiment_ended, maze_size, maze_complexity, animal_sound, \
         level_list, stage_performance, baseline_maze, path_of_maze
 
-    if baseline_maze < 12:
+    amount_of_levels = 10  # Amount of levels to play before starting the N-back task
+
+    if baseline_maze < amount_of_levels + 2:
         baseline_maze += 1
-        if baseline_maze > 10:
-            maze_size = 5
+        # Structured increase in difficulty for the training phase
+        if baseline_maze <= 4:
+            maze_size = 5  # First 4 rounds with maze size 5
+        elif 5 <= baseline_maze <= 7:
+            maze_size = 10  # Next 3 rounds with maze size 10
+        elif 8 <= baseline_maze <= 10:
+            maze_size = 15  # Last 3 rounds with maze size 15
         else:
-            maze_size = random.choice([5, 10, 15])
+            maze_size = 5  # Default to 5 for rounds beyond the specified training phase
     if baseline_maze > 1:
         # Analyze the latest performance from experiment_data
         # Placeholder for performance analysis logic
-        errors = analyze_performance()
-        stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': errors,
+        error_rate, adjusted_threshold = analyze_performance()
+        stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': error_rate,
                                   'n_back_level': n_back_level, 'maze_size': maze_size,
                                   'animal_sound': animal_sound, "path_of_maze": path_of_maze[-1]})
-        print(f"Performance error: {errors}")
-
-        # Criteria for performance evaluation
-        acceptable_error_threshold = 0.3  # Example threshold
-        significant_drop_threshold = 0.8  # Example threshold for significant performance drop
+        print(f"Performance error: {error_rate}")
 
         # Logic to decide on increasing difficulty or ending the experiment
-        if errors <= acceptable_error_threshold and baseline_maze == 12:
+        if error_rate <= adjusted_threshold and baseline_maze == amount_of_levels+2:
             # Decide which aspect to increase: This is a simplified example; implement your own logic
             if level_list[0] == 0:  # Increase the N-back level
                 animal_sound = False
@@ -549,12 +516,10 @@ def setup_level(n_back_level, screen_width, screen_height):
             else:
                 animal_sound = True
                 level_list = [0, 0, 0]  # Reset the level list
-        elif errors > significant_drop_threshold:
+        elif error_rate > adjusted_threshold:
             # send trigger to indicate that the subject has high error rates
             log_event(10, datetime.now().timestamp())
 
-    # # Generate the new level's maze with updated parameters
-    # maze = maze_to_ndarray(maze_size, 6, maze_complexity)
 
     # Adjusted code to load the maze instead of generating a new one
     maze = load_maze_from_file(maze_size)
@@ -583,14 +548,46 @@ def calculate_performance_ratio(current_stat, prev_stat):
         return current_stat
 
 
+def calculate_gradient(error_rates):
+    """
+    Calculate the performance gradient using a simple linear regression over
+    the error rates of the last few rounds.
+    """
+    # Assuming error_rates is a list of floats
+    # This is a placeholder for the actual calculation
+    slope = np.polyfit(range(len(error_rates)), error_rates, 1)[0]
+    return slope
+
+
+def adjust_threshold(current_threshold, gradient, maze_size, base_maze_size=5, adjustment_factor=0.05):
+    """
+    Adjust the error threshold dynamically based on the performance gradient,
+    current threshold, and maze size.
+    """
+    # Adjust the threshold based on maze size
+    maze_size_factor = maze_size / base_maze_size
+    maze_adjustment = (maze_size_factor - 1) * adjustment_factor
+
+    # Dynamic adjustment based on the performance gradient
+    if gradient < 0:  # Improvement shown
+        new_threshold = current_threshold - adjustment_factor
+    else:  # No improvement or worsening
+        new_threshold = current_threshold + adjustment_factor
+
+    # Ensure the new threshold doesn't become too lenient or too stringent
+    new_threshold = min(max(new_threshold + maze_adjustment, 0.1), 1.0)  # Assuming thresholds should be between 0.1 and 1.0
+
+    return new_threshold
+
+
 def analyze_performance():
-    global performance_ratios
+    global performance_ratios, stage_performance, current_threshold
 
     # Initialize counts of levels completed
     levels_completed = sum(data['trigger_id'] == 4 for data in experiment_data)
 
     if levels_completed == 1:  # For the first step, the error is 0
-        return 0
+        return 0, 1
 
     # Calculation of the amount of triggers of each type for the level that is now finished, and the previous level
     current_triggers = [0, 0, 0]
@@ -615,7 +612,7 @@ def analyze_performance():
         performance_ratios['FP'].append(0)
 
     if levels_completed < 4:
-        return 0
+        return 0, 1
 
     # Calculate the rates of the duration, True Positives and False Positives
     opp_tp_current_rate = calculate_performance_ratio(1 - performance_ratios['TP'][-1],
@@ -638,8 +635,26 @@ def analyze_performance():
 
     print(f"duration_rate: {duration_rate}, tp_rate: {tp_rate}, fp_rate: {fp_rate}")
 
-    # Return the average of the rates
-    return duration_rate / 9 + tp_rate * 4 / 9 + fp_rate * 4 / 9
+    # Calculate the error rate
+    error_rate = duration_rate / 9 + tp_rate * 4 / 9 + fp_rate * 4 / 9
+
+    if len(stage_performance) < 10:
+        adjusted_threshold = 1
+    else:
+        # List of last 5 error rates
+        recent_error_rates = []
+        for i in range(5):
+            recent_error_rates.append(stage_performance[-5+i]['error_rate'])
+        # Calculate the performance gradient for the last 5 error rates
+        gradient = calculate_gradient(recent_error_rates)
+
+        # Adjust the base error threshold based on the gradient
+        # Assuming 'acceptable_error_threshold' is a predefined constant
+        adjusted_threshold = adjust_threshold(current_threshold, gradient, maze_size)
+        # Update the current threshold for the next level
+        current_threshold = adjusted_threshold
+
+    return error_rate, adjusted_threshold
 
 
 def is_maze_completed(player_x, player_y, maze):  # check if the player reached the exit
@@ -673,15 +688,16 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
         for key, value in user_details.items():
             file.write(f"{key}: {value}\n")
 
-    # Save error performance
-    error_file_path = os.path.join(folder_name, 'stage_performance.csv')
-    with open(error_file_path, 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=['timestamp', 'error_rate', 'n_back_level', 'maze_size',
-                                                  'path_of_maze', 'animal_sound', 'Mental Demand',
-                                                  'Performance', 'Effort', 'Frustration'])
-        writer.writeheader()
-        for data in stage_performance:
-            writer.writerow(data)
+        # Save error performance and NASA-TLX weights together
+        error_file_path = os.path.join(folder_name, 'stage_performance.csv')
+        with open(error_file_path, 'w', newline='') as file:
+            # Include weight keys in the fieldnames
+            fieldnames = list(stage_performance[0].keys())
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            # Assuming weights should be included in every line of stage_performance data
+            for data in stage_performance:
+                writer.writerow(data)
 
     # Save NASA-TLX weights
     weights_file_path = os.path.join(folder_name, 'nasa_tlx_weights.csv')
@@ -696,9 +712,6 @@ object_sounds = load_sounds(os.path.join("back_sound", "sound_object"), "object"
 animal_sounds = load_sounds(os.path.join("back_sound", "sound_animal"), "animal")
 
 sound_sequence = []  # Reset for the new level
-
-# # Initialize Pygame
-# pygame.init()
 
 # Timers and intervals
 time_since_last_sound = 0  # Time elapsed since the last sound played
@@ -718,9 +731,9 @@ experiment_start_time = datetime.now()  # Track the start time of the experiment
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.display.set_caption("Maze experiment")
 
-# # Show welcome screen
-# if not welcome_screen(screen):
-#     exit()
+# Show welcome screen
+if not welcome_screen(screen):
+    exit()
 
 # Define the screen size
 screen_width = 640
@@ -737,8 +750,8 @@ while True:
     if user_details is not None and user_details['Serial Number'].isdigit() and len(user_details['Serial Number']) == 3:
         break
 
-# # Perform the calibration
-# calibration_screen(screen)
+# Perform the calibration
+calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze
@@ -801,6 +814,10 @@ response_made = False
 # Maze loop
 running = True
 
+#
+cooldown_duration = 50  # milliseconds
+last_move_time = 0  # track the last move time
+
 # Log event for the start of a new level
 log_event(4, datetime.now().timestamp())
 
@@ -833,15 +850,19 @@ while running:
     # Blit the maze background
     screen.blit(maze_background, (0, 0))
 
-    # Move player based on key state
-    if key_pressed == pygame.K_LEFT and player_x - speed >= 0 and maze[player_y, player_x - speed] == 0:
-        player_x -= speed
-    elif key_pressed == pygame.K_RIGHT and player_x + speed < maze.shape[1] and maze[player_y, player_x + speed] == 0:
-        player_x += speed
-    elif key_pressed == pygame.K_UP and player_y - speed >= 0 and maze[player_y - speed, player_x] == 0:
-        player_y -= speed
-    elif key_pressed == pygame.K_DOWN and player_y + speed < maze.shape[0] and maze[player_y + speed, player_x] == 0:
-        player_y += speed
+    current_time = pygame.time.get_ticks()
+    if key_pressed and current_time - last_move_time > cooldown_duration:
+        # Move player based on key state
+        if key_pressed == pygame.K_LEFT and player_x - speed >= 0 and maze[player_y, player_x - speed] == 0:
+            player_x -= speed
+        elif key_pressed == pygame.K_RIGHT and player_x + speed < maze.shape[1] and maze[player_y, player_x + speed] == 0:
+            player_x += speed
+        elif key_pressed == pygame.K_UP and player_y - speed >= 0 and maze[player_y - speed, player_x] == 0:
+            player_y -= speed
+        elif key_pressed == pygame.K_DOWN and player_y + speed < maze.shape[0] and maze[player_y + speed, player_x] == 0:
+            player_y += speed
+        #
+        last_move_time = current_time
 
     # Sound playback logic
     if n_back_level > 0:

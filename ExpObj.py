@@ -102,7 +102,8 @@ class ExpObj():
         plt.xlabel('Time (s)')
         plt.ylabel('EMG (mV)')
         plt.title('EMG Data')
-        plt.show()
+        plt.show(block=False)
+        input("Press Enter to keep going...")
 
     def frequency_spectrum(self, emg_data):
         """
@@ -137,7 +138,8 @@ class ExpObj():
             plt.ylabel('Magnitude')
             plt.xlim([0, Fs / 2])  # Show only up to the Nyquist frequency
             plt.grid(True)
-            plt.show()
+            plt.show(block=False)
+            input("Press Enter to keep going...")
 
     def plot_trail(self, trail):
         """
@@ -174,7 +176,8 @@ class ExpObj():
         fig.text(0.04, 0.5, 'Amplitude [mV]', va='center', rotation='vertical')  # Common Y-axis title
 
         plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
-        plt.show()
+        plt.show(block=False)
+        input("Press Enter to keep going...")
 
     def create_trials(self, mode):
 

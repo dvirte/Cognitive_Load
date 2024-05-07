@@ -14,12 +14,12 @@ xdf_name = filedialog.askopenfilename(initialdir="raw_data", title="Select file"
 
 data = DataObj(xdf_name)
 diocan = ExpObj(data.ElectrodeStream, data.Trigger_Cog)
-status = 1  # 0 for rest, 1 for task
-period = 30  # represents the period of the task
+status = 0  # 0 for rest, 1 for task
+period = 0  # represents the period of the task
 
 # Plot the data before filtering
 cali_before = diocan.extract_emg_trials(status, period)
-diocan.plot_trail(cali_before)
+# diocan.plot_trail(cali_before)
 
 # Plot the data after notch filter of 50 Hz
 diocan.apply_notch_filters([50, 100])
@@ -28,4 +28,4 @@ cali_after_50 = diocan.extract_emg_trials(status, period)
 diocan.plot_trail(cali_after_50)
 diocan.plot_data(cali_after_50)
 
-a=5
+input("Press Enter to close the plots and exit...")

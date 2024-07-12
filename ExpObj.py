@@ -3,9 +3,7 @@ from matplotlib.image import imread
 import numpy as np
 from scipy.signal import iirnotch, filtfilt
 from scipy.signal import butter, filtfilt
-from scipy.optimize import curve_fit
-from scipy.optimize import fsolve
-from sklearn.decomposition import FastICA
+import pandas as pd
 
 
 class ExpObj():
@@ -23,13 +21,15 @@ class ExpObj():
         self.triggers_time_stamps = trigger_stream['time_stamps']
         self.rest_periods, self.play_periods, self.calibrate_periods = self.find_periods()
         self.fs = 250
-        self.trials = None
-        self.responses = None
-        self.levels = None
-        self.grouped_responses = None
-        self.stim_start_idx = None
-        self.aligned_correlated_trials = None
-        self.trials_by_level = None
+        self.eeg_data_alpha = self.apply_bandpass_filter(8, 13)
+        self.eeg_data_beta = self.apply_bandpass_filter(13, 30)
+        self.eeg_data_theta = self.apply_bandpass_filter(4, 7)
+        self.eeg_data_delta = self.apply_bandpass_filter(1, 4)
+        self.emg_complementary_data = self.apply_bandpass_filter(1, 35)
+        self.apply_notch_filters([50, 100])
+        self.emg_data = self.apply_bandpass_filter(35, 124)
+        self.list_of_elements = ['EEG_alpha', 'EEG_beta', 'EEG_theta', 'EEG_delta', 'EMG', 'EMG_complementary']
+        self.relevant_data, self.relevant_name = self.extract_relevant_electrodes()
 
     def find_periods(self):
         """
@@ -38,72 +38,109 @@ class ExpObj():
         rest_periods = []
         play_periods = []
         calibrate_periods = []
-        end_idx = None
         cal_ind = None
+        start_rest = None
 
         for i, trigger in enumerate(self.triggers):
-            if trigger == 6 or trigger == 9:
-                start_idx = i
-                if end_idx is not None:
-                    play_periods.append((self.triggers_time_stamps[end_idx], self.triggers_time_stamps[start_idx]))
-            elif trigger == 4 or trigger == 5:
-                end_idx = i
-                rest_periods.append((self.triggers_time_stamps[start_idx], self.triggers_time_stamps[end_idx]))
+            if trigger == 4:
+                start_play = i
+            elif trigger == 9:
+                play_periods.append((self.triggers_time_stamps[start_play], self.triggers_time_stamps[i]))
+            elif trigger == 11:
+                start_rest = i
+            elif trigger == 8 and start_rest is not None:
+                rest_periods.append((self.triggers_time_stamps[start_rest], self.triggers_time_stamps[i]))
             elif 13 <= trigger <= 18:
                 if cal_ind is not None:
                     calibrate_periods.append((self.triggers_time_stamps[cal_ind], self.triggers_time_stamps[i]))
                 cal_ind = i
 
-        if trigger != 5:
-            rest_periods.append((self.triggers_time_stamps[end_idx], self.triggers_time_stamps[-1]))
+        while True:
+            if self.triggers[i - 1] == 9:
+                break
+            elif self.triggers[i - 1] == 4:
+                # pop the last element in the rest_periods list
+                last_start, last_end = rest_periods.pop()
+                rest_periods.append((last_start, self.triggers_time_stamps[-1]))
+                break
+            else:
+                i -= 1
+
         return rest_periods, play_periods, calibrate_periods
 
-    def extract_emg_trials(self, status, period):
+    def extract_band_trials(self, status, period, kind='EMG'):
         """
         Extracts the EMG data for a specific level and response status.
 
         Parameters:
-        status (int): 0 for rest, 1 for play.
+        status (int): 0 for rest, 1 for play, 2 for calibration.
         period (int): the specific period to extract the data from.
+        kind (str): the type of data to extract (e.g., 'EEG_alpha', 'EEG_beta', 'EEG_theta', 'EEG_delta', 'EMG').
 
         Returns:
-        list: list[0] contains the EMG data for the specific level and response status.
-        list: list[1] contains the timestamps for the EMG data.
+        ndarray: tuple[0] contains the EMG data for the specific level and response status.
+        ndarray: tuple[1] contains the timestamps for the EMG data.
+        ndarray: tuple[2] contains the triggers
+        ndarray: tuple[3] contains the time stamps of the triggers
+        tuple: tuple[4] contains the status, period and kind of the data
         """
         if status == 0:
             periods = self.rest_periods
         elif status == 1:
             periods = self.play_periods
+        elif status == 2:
+            periods = self.calibrate_periods
         else:
-            raise ValueError("status must be 0 or 1")
+            raise ValueError("status must be 0, 1 or 2")
 
-        start, stop = periods[period]
+        if status != 2:
+            start, stop = periods[period]
+        else:
+            start, stop = periods[0][0], periods[-1][1]
+
+        # Choose the element to extract
+        if kind == 'EEG_alpha':
+            data = self.eeg_data_alpha
+        elif kind == 'EEG_beta':
+            data = self.eeg_data_beta
+        elif kind == 'EEG_theta':
+            data = self.eeg_data_theta
+        elif kind == 'EEG_delta':
+            data = self.eeg_data_delta
+        elif kind == 'EMG':
+            data = self.emg_data
+        elif kind == 'EMG_complementary':
+            data = self.emg_complementary_data
+        elif kind == 'relevant':
+            data = self.relevant_data
+        else:
+            raise ValueError("kind must be 'EEG_alpha', 'EEG_beta', 'EEG_theta', 'EEG_delta', 'EMG' or 'relevant'")
 
         # Find the indices of the time stamps that fall within the game time stamps
         start_idx = np.searchsorted(self.data_timestamps, start)
+        if self.data_timestamps[start_idx] > start:
+            start_idx = max(start_idx - 1, 0)
         stop_idx = np.searchsorted(self.data_timestamps, stop, side='right')
-        return self.data[start_idx:stop_idx, :], self.data_timestamps[start_idx:stop_idx]
+        if self.data_timestamps[stop_idx] < stop:
+            start_idx = min(stop_idx + 1, len(self.data_timestamps))
+        mask = ((self.triggers_time_stamps >= self.data_timestamps[start_idx]) &
+                (self.triggers_time_stamps <= self.data_timestamps[stop_idx]))
+        indices = np.where(mask)[0]
 
-    def plot_data(self, trail):
-        """
-        Plots the EMG data on single plot.
+        if status == 1:
+            if self.triggers[indices[0]] == 8:
+                indices = np.delete(indices, 0)
+            if self.triggers[indices[-1]] == 11:
+                indices = np.delete(indices, -1)
 
-        Parameters:
-        trail (list): trail[0] contains the EMG data for the specific level and response status.
-        trail (list): trail[1] contains the timestamps for the EMG data.
+        if status == 0:
+            if self.triggers[indices[0]] == 9:
+                indices = np.delete(indices, 0)
+            if self.triggers[indices[-1]] == 4:
+                indices = np.delete(indices, -1)
 
-        Returns:
-        None: The EMG data is plotted.
-        """
-        # convert to seconds
-        time = trail[1] - trail[1][0]
-        plt.figure()
-        plt.plot(time, trail[0])
-        plt.xlabel('Time (s)')
-        plt.ylabel('EMG (mV)')
-        plt.title('EMG Data')
-        plt.show(block=False)
-        input("Press Enter to keep going...")
+        return (data[start_idx:stop_idx, :], self.data_timestamps[start_idx:stop_idx],
+                self.triggers[indices], self.triggers_time_stamps[indices], (status, period, kind))
 
     def frequency_spectrum(self, emg_data):
         """
@@ -141,6 +178,38 @@ class ExpObj():
             plt.show(block=False)
             input("Press Enter to keep going...")
 
+    def extract_relevant_electrodes(self):
+        # Extract electrodes 14-16 for EEG bands and EMG complementary
+        eeg_alpha_relevant = self.eeg_data_alpha[:, 0:4]
+        eeg_beta_relevant = self.eeg_data_beta[:, 0:4]
+        eeg_theta_relevant = self.eeg_data_theta[:, 0:4]
+        eeg_delta_relevant = self.eeg_data_delta[:, 0:4]
+        emg_complementary_relevant = self.emg_complementary_data[:, 0:4]
+
+        # Keep all electrodes for EMG
+        emg_relevant = self.emg_data
+
+        # Combine all relevant electrodes into a single set
+        combined_data = np.hstack((
+            eeg_alpha_relevant,
+            eeg_beta_relevant,
+            eeg_theta_relevant,
+            eeg_delta_relevant,
+            emg_complementary_relevant,
+            emg_relevant
+        ))
+
+        # List of relevant elements and channels
+        relevant_elements = ['EEG_alpha_ch16', 'EEG_alpha_ch15', 'EEG_alpha_ch14', 'EEG_alpha_ch13', 'EEG_beta_ch16',
+                             'EEG_beta_ch15', 'EEG_beta_ch14', 'EEG_beta_ch13', 'EEG_theta_ch16', 'EEG_theta_ch15',
+                             'EEG_theta_ch14', 'EEG_theta_ch13', 'EEG_delta_ch16', 'EEG_delta_ch15', 'EEG_delta_ch14',
+                             'EEG_delta_ch13', 'EMG_complementary_ch16', 'EMG_complementary_ch15',
+                             'EMG_complementary_ch14', 'EMG_complementary_ch13', 'EMG_ch16', 'EMG_ch15', 'EMG_ch14',
+                             'EMG_ch13', 'EMG_ch12', 'EMG_ch11', 'EMG_ch10', 'EMG_ch9', 'EMG_ch8', 'EMG_ch7',
+                             'EMG_ch6', 'EMG_ch5', 'EMG_ch4', 'EMG_ch3', 'EMG_ch2', 'EMG_ch1']
+
+        return combined_data, relevant_elements
+
     def plot_trail(self, trail):
         """
         Plots a series of subplots for each channel in the trail data.
@@ -154,20 +223,45 @@ class ExpObj():
         Returns:
         - None: The plot is displayed.
         """
-        data, timestamps = trail
+        data, timestamps, triggers, trigger_times = trail[0], trail[1], trail[2], trail[3]
+        trigger_times = trigger_times - timestamps[0]
         timestamps = timestamps - timestamps[0]  # Convert to seconds
+        status, period, kind = trail[4]
         samples, channels = data.shape
 
+        # Define the title based on the status and period
+        if status == 0:
+            title = f'{kind} - Rest Period: {period}'
+        elif status == 1:
+            title = f'{kind} - Task Period: {period}'
+        elif status == 2:
+            title = f'{kind} - Calibration'
+
+        # Determine the global min and max values across all channels
+        global_min = np.min(data)
+        global_max = np.max(data)
+
         fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
+        fig.suptitle(title, fontsize=16)  # Add title to the plot
 
         for i in range(channels):
-            axs[i].plot(timestamps, data[:, i])  # Plot each channel
-            axs[i].text(1.02, 0.5, f'EMG {i + 1}', transform=axs[i].transAxes, va='center', ha='left')
+            axs[i].plot(timestamps, data[:, channels - 1 - i])  # Plot each channel
+            axs[i].text(1.02, 0.5, f'EMG {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
             axs[i].spines['top'].set_visible(False)  # Hide the top spine
             axs[i].spines['right'].set_visible(False)  # Hide the right spine
             axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
             axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
             axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
+            axs[i].set_ylim(global_min, global_max)  # Set the same Y-axis limits for all subplots
+
+            # Add vertical red lines for triggers
+            for trigger_time in trigger_times:
+                axs[i].axvline(x=trigger_time, color='red', linestyle='--')
+
+        # Add trigger labels on the last subplot
+        for j, trigger_time in enumerate(trigger_times):
+            axs[-1].text(trigger_time, axs[-1].get_ylim()[0] - 0.05 * (axs[-1].get_ylim()[1] - axs[-1].get_ylim()[0]),
+                         f'Trigger {int(triggers[j])}', color='red', ha='center', va='top', rotation=90)
 
         # Adjust settings for the last subplot
         axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
@@ -178,92 +272,6 @@ class ExpObj():
         plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
         plt.show(block=False)
         input("Press Enter to keep going...")
-
-    def create_trials(self, mode):
-
-        trials = []
-        responses = []
-        levels = []
-        grouped_responses = {}
-        stim_start_idx = []
-        trials_by_level = {}
-        pre_trigger_offset = int(0.1 * self.fs)  # 0.5 seconds before trigger
-        post_trigger_offset = int(1.5 * self.fs)  # 1 second after trigger
-
-        for i, (trigger, timestamp) in enumerate(zip(self.triggers, self.triggers_time_stamps)):
-
-            if 'play_stimulus' in trigger[0] and mode in trigger[0] and 'training' not in self.triggers[i + 2][
-                0] and 'press' in self.triggers[i + 2][0]:
-                trigger_index = np.searchsorted(self.data_timestamps, timestamp)
-                start_idx = max(trigger_index - pre_trigger_offset, 0)
-                end_idx = min(trigger_index + post_trigger_offset, len(self.data_timestamps))
-                trial_data = self.data[start_idx:end_idx, :]
-                trials.append(trial_data)
-                response = 1 if 'return' in self.triggers[i + 2][0] else 0
-                responses.append(response)
-                parts = self.triggers[i + 2][0].split('_')
-                # Assuming the level is at a specific position in the trigger string
-                level = parts[2]
-                # Adjust the index based on your trigger string format
-                levels.append(level)
-                stim_start_idx.append(start_idx)
-                if level not in grouped_responses:
-                    grouped_responses[level] = []
-                grouped_responses[level].append(response)
-                if level not in trials_by_level:
-                    trials_by_level[level] = []
-                trials_by_level[level].append(trial_data)
-
-        level_keys = list(grouped_responses.keys())
-        for level in level_keys:
-            new_level = float(level)
-            grouped_responses[new_level] = grouped_responses.pop(level)
-
-        self.grouped_responses = dict(sorted(grouped_responses.items()))
-        self.trials = trials
-        self.responses = responses
-        self.levels = levels
-        self.stim_start_idx = stim_start_idx
-        self.trials_by_level = trials_by_level
-
-    def calculate_psychometric_curve(self, plot_figure=False):
-        grouped_responses = self.grouped_responses
-        levels = sorted(grouped_responses.keys())
-        hit_rates = [np.mean(grouped_responses[level]) for level in levels]
-        notfit = False
-        initial_guess = [max(hit_rates), np.median(levels), 1, min(hit_rates)]
-
-        def sigmoid_model(x, L, x0, k, b):
-            try:
-                return L / (1 + np.exp(-k * (x - x0))) + b
-            except:
-                return np.arange(0, len(x), 1)
-
-        try:
-            params, _ = curve_fit(sigmoid_model, levels, hit_rates, p0=initial_guess)
-
-            # Find the 50% Level
-            sigmoid_half = lambda x: sigmoid_model(x, *params) - 0.5
-
-            level_50_percent = fsolve(sigmoid_half, np.median(levels))[0]
-
-        except:
-            notfit = True
-        # Convert data points to PsychoPy coordinates
-        # Assuming levels range from 0 to 1 and hit_rates range from 0 to 1
-        fine_grained_levels = np.linspace(min(levels), max(levels), 500)
-        if plot_figure:
-            plt.figure()
-            plt.plot(levels, hit_rates, 'o', label='Raw Data')
-            if notfit:
-                plt.plot(fine_grained_levels, sigmoid_model(fine_grained_levels, *params), label='Sigmoid Fit')
-
-            plt.xlabel('Stimulation Level')
-            plt.ylabel('Hit Rate')
-            plt.title(f"Psychometric Curve")
-            plt.legend()
-            plt.grid(True)
-            plt.show()
 
     def apply_notch_filters(self, freqs, quality_factor=30):
         """
@@ -279,42 +287,6 @@ class ExpObj():
         for freq in freqs:
             b, a = iirnotch(freq, quality_factor, self.fs)
             self.data = filtfilt(b, a, self.data, axis=0)
-
-    def dft_multichannel(self, nfft, axis=-1):
-        f = np.fft.fftfreq(nfft, 1 / self.fs)
-        f_keep = f > 0
-        f = f[f_keep]
-
-        n_channels = self.data.shape[-1]
-        fft_values = np.zeros((n_channels, len(f)))
-
-        for i in range(n_channels):
-            y = np.abs(np.fft.fft(self.data[:, i], nfft, axis=axis))[f_keep]
-            fft_values[i] = y
-
-        return f, fft_values
-
-    def average_chunks_by_mode(self, aligned_emf_chunks_by_mode):
-        """
-        Average the chunks for each stimulation mode.
-
-        Parameters:
-        aligned_emf_chunks_by_mode (dict): Dictionary containing aligned chunks, organized by stimulation modes.
-
-        Returns:
-        dict: Dictionary containing averaged chunks for each stimulation mode.
-        """
-        averaged_chunks_by_mode = {}
-        for mode, chunks in aligned_emf_chunks_by_mode.items():
-            # Ensuring all chunks have the same shape for averaging
-            min_length = min(chunk['aligned_chunk'].shape[0] for chunk in chunks)
-            aligned_chunks = [chunk['aligned_chunk'][:min_length, :] for chunk in chunks]
-
-            # Calculating the average
-            average_chunk = np.mean(aligned_chunks, axis=0)
-            averaged_chunks_by_mode[mode] = average_chunk
-
-        return averaged_chunks_by_mode
 
     def apply_bandpass_filter(self, lowcut, highcut, order=5):
         """
@@ -339,115 +311,266 @@ class ExpObj():
         low = lowcut / nyq
         high = highcut / nyq
         b, a = butter(order, [low, high], btype='band')
-        self.data = filtfilt(b, a, self.data, axis=0)
+        return filtfilt(b, a, self.data, axis=0)
 
-    def get_recorded_pulses(self, win_size):
-        """result is 3D numpy array: pulse num x channel x segment data"""
-        win_size = int(win_size / 1000 * self.fs)
-        data = np.array(self.trials)
-        data = np.transpose(data, (0, 2, 1))
-        result = []
-        if len(data.shape) == 1:
-            data = np.vstack([data, data])
-        for idx in self.stim_start_idx:
-            start = max(0, idx - win_size // 2)
-            end = min(data.shape[1], idx + win_size // 2)
-            result.append(data[:, start:end])
-        result = np.array(result)
-        return result
+    def calculate_stat(self, data, window_size, overlap, stat):
+        """
+        Calculate the statistical values for each window.
 
-    def pulse_correlation(self, win_size=2, visualize=False):
-        print('Align pulses...')
-        # pulses_win = self.get_recorded_pulses(win_size)
-        pulses_win = np.array(self.trials)
-        pulses_win = np.transpose(pulses_win, (0, 2, 1))
-        pulses_win_aligned = []
-        for channel in range(pulses_win.shape[1]):
-            data = pulses_win[:, channel, :]
-            num_segments, samples_per_segment = data.shape
-            synced_data = np.zeros((num_segments, samples_per_segment))
-            synced_data[0, :] = data[0, :]
-            # Iterate through pairs of segments to find time delays and synchronize
-            for i in range(1, num_segments):
-                corr = np.correlate(data[0], data[i], mode='full')
-                max_idx = np.argmax(corr)
-                delay = max_idx - samples_per_segment + 1
+        Parameters:
+        data (ndarray): The data to calculate the RMS for.
+        window_size (float): The size of the window in seconds.
+        overlap (float): The overlap between windows as a fraction.
 
-                # Shift segments based on calculated delay and pad with zeros
-                if delay < 0:
-                    synced_data[i, :delay] = data[i, -delay:]
-                if delay > 0:
-                    synced_data[i, delay:] = data[i, delay:]
-                else:
-                    synced_data[i, :] = data[i, :]
-            pulses_win_aligned.append(synced_data)
-        pulses_win_aligned = np.array(pulses_win_aligned).transpose(1, 0, 2)
+        Returns:
+        ndarray: The statistical values for each window.
+        """
+        window_size = int(window_size * self.fs)
+        overlap = int(overlap * window_size)
+        stat_values = []
 
-        self.aligned_correlated_trials = pulses_win
+        if stat == 'rms':
+            for i in range(0, data[0].shape[0] - window_size, window_size - overlap):
+                window = data[0][i:i + window_size, :]
+                stat_values.append(np.sqrt(np.mean(window ** 2, axis=0)))
+        elif stat == 'energy':
+            for i in range(0, data[0].shape[0] - window_size, window_size - overlap):
+                window = data[0][i:i + window_size, :]
+                stat_values.append(np.sum(window ** 2, axis=0))
 
-    def clean_grouped_pulses_ica(self, pulses, visualize=True):
-        """result is 3D numpy array: pulse num x channel x segment data"""
+        return np.array(stat_values)
 
-        artifacts_mat = []
-        signals_mat = []
+    def stat_band(self, status, period, window_size=0.5, overlap=0.5, stat='rms', relevant=True):
+        """
+        Calculate the statistical values for each frequency band.
+        Parameters:
+        status (int): 0 for rest, 1 for task, 2 for calibration.
+        period (int): the specific period to extract the data from.
+        window_size (float): The size of the window in seconds.
+        overlap (float): The overlap between windows as a fraction.
+        :return:
+        stat_alpha: statistical values for the alpha band
+        stat_beta: statistical values for the beta band
+        stat_theta: statistical values for the theta band
+        stat_delta: statistical values for the delta band
+        stat_emg: statistical values for the EMG band
+        stat_emg_complementary: statistical values for the EMG complementary band
+        """
+        if relevant:
+            relevant_data = self.extract_band_trials(status, period, 'relevant')
+            return self.calculate_stat(relevant_data, window_size, overlap, stat)
+        else:
+            # Extract the EEG data for the specific level and response status
+            eeg_alpha = self.extract_band_trials(status, period, 'EEG_alpha')
+            eeg_beta = self.extract_band_trials(status, period, 'EEG_beta')
+            eeg_theta = self.extract_band_trials(status, period, 'EEG_theta')
+            eeg_delta = self.extract_band_trials(status, period, 'EEG_delta')
+            emg = self.extract_band_trials(status, period, 'EMG')
+            emg_complementary = self.extract_band_trials(status, period, 'EMG_complementary')
 
-        for channel_ind in range(0, pulses.shape[1]):
-            print(f'Processing channel {channel_ind}')
-            data = pulses[:, channel_ind, :].T
+            # Calculate the RMS for each frequency band by windowing the data
+            stat_alpha = self.calculate_stat(eeg_alpha, window_size, overlap, stat)
+            stat_beta = self.calculate_stat(eeg_beta, window_size, overlap, stat)
+            stat_theta = self.calculate_stat(eeg_theta, window_size, overlap, stat)
+            stat_delta = self.calculate_stat(eeg_delta, window_size, overlap, stat)
+            stat_emg = self.calculate_stat(emg, window_size, overlap, stat)
+            stat_emg_complementary = self.calculate_stat(emg_complementary, window_size, overlap, stat)
 
-            # # Check distribution
-            # shapiro_test_result = shapiro(data[:, 0])
-            # shapiro_p_value = shapiro_test_result[1]
-            # alpha = 0.05
-            # if shapiro_p_value > alpha:
-            #     print(f'Channel {channel_ind} distribution is Gaussian')
-            #     continue
+            return stat_alpha, stat_beta, stat_theta, stat_delta, stat_emg, stat_emg_complementary
 
-            # Create artifact template
-            art_template = np.mean(data, axis=1)
+    def plot_stat(self, stat_values, status, period, kind='RMS', specific_bands=None):
+        """
+        Plot the statistical values for each frequency band.
 
-            # Preform ICA
-            ica = FastICA(n_components=6, random_state=42, max_iter=100)
-            ica.fit(data)
-            print(f'Number of iterations taken for convergence: {ica.n_iter_}')
-            components = ica.transform(data)
+        Parameters:
+        stat_values (tuple): The statistical values for each frequency band.
+        status (int): 0 for rest, 1 for task, 2 for calibration.
+        period (int): the specific period to extract the data from.
 
-            # For each component, calculate correlation to the template
-            pp_list = []
-            corr_list = []
-            pp_sign_list = []
-            for ind in range(0, 6):
-                # fig=plt.figure()
-                # plt.plot(components[:, ind]-10*ind)
-                corr = np.corrcoef(components[100:150, ind], art_template[100:150])[0, 1]
-                corr_list.append(abs(corr))
-                largest_peak_index = np.argmax(np.abs(components[:, ind]))
-                pp_list.append(largest_peak_index)
-                pp_sign_list.append(components[largest_peak_index, ind])
-                # pp_list.append(np.max(components[:, ind]))
+        Returns:
+        None: The statistical values are plotted.
+        """
+        stat_alpha, stat_beta, stat_theta, stat_delta, stat_emg, stat_emg_complementary = stat_values
 
-            # Divide components to artifact-related and signal-related
-            corr_thresh = 0.1  # was 0.1
-            pp_thresh = 160
+        # Create a time axis for the RMS values
+        time = np.arange(0, len(stat_alpha)) * 0.25
 
-            art_related_comp = np.where((np.array(corr_list) > corr_thresh) | (np.array(pp_list) < pp_thresh))
-            # art_related_comp = np.where(
-            #     (np.array(pp_sign_list) > 0) &
-            #     ((np.array(corr_list) > corr_thresh) | (np.array(pp_list) < pp_thresh)))
+        # Define the title based on the status and period
+        channels = 16
 
-            signal_comp = components.copy()
-            signal_comp[:, art_related_comp] = 0
-            restored_signal = ica.inverse_transform(signal_comp)
-            signals_mat.append(restored_signal)
+        all_frequency_bands = {
+            'Alpha': stat_alpha,
+            'Beta': stat_beta,
+            'Theta': stat_theta,
+            'Delta': stat_delta,
+            'EMG': stat_emg,
+            'EMG_complementary': stat_emg_complementary
+        }
 
-            signal_related_comp = np.setdiff1d(np.arange(0, 6), art_related_comp)
-            art_comp = components.copy()
-            art_comp[:, signal_related_comp] = 0
-            restored_artifact = ica.inverse_transform(art_comp)
-            artifacts_mat.append(restored_artifact)
+        if specific_bands is None:
+            frequency_bands = all_frequency_bands
+        else:
+            frequency_bands = {band: all_frequency_bands[band] for band in specific_bands if
+                               band in all_frequency_bands}
 
-            # plt.plot(np.array(corr_list)-channel_ind)
+        for band, data in frequency_bands.items():
+            title = f'{kind} Values for {band} Band - Status: {status}, Period: {period}'
+            fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
+            fig.suptitle(title, fontsize=16)  # Add title to the plot
 
-        signals_mat_3d = np.stack(signals_mat, axis=1).transpose(2, 1, 0)
-        artifacts_mat_3d = np.stack(artifacts_mat, axis=1).transpose(2, 1, 0)
-        return signals_mat_3d, artifacts_mat_3d
+            # Determine the global min and max values across all channels
+            global_min = np.min(data)
+            global_max = np.max(data)
+
+            for i in range(channels):
+                axs[i].plot(time, data[:, channels - 1 - i])
+                axs[i].text(1.02, 0.5, f'Channel {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
+                axs[i].spines['top'].set_visible(False)  # Hide the top spine
+                axs[i].spines['right'].set_visible(False)  # Hide the right spine
+                axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
+                axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
+                axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
+                axs[i].set_ylim(global_min, global_max)  # Set the same Y-axis limits for all subplots
+
+            # Adjust settings for the last subplot
+            axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
+            axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
+            axs[-1].set_xlabel("Time [s]")  # Common X-axis title
+            fig.text(0.04, 0.5, 'RMS', va='center', rotation='vertical')  # Common Y-axis title
+
+            plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
+            plt.show(block=False)
+        input("Press Enter to keep going...")
+
+    def extract_statistics(self, trail):
+        """
+        Extract statistical values for each filter in the trail.
+
+        Parameters:
+        trail (tuple of ndarrays): A tuple containing 6 different bands, each an ndarray with 16 columns (channels).
+        list of bands: ['Alpha', 'Beta', 'Theta', 'Delta', 'emg', 'complementary emg']
+
+        Returns:
+        stats_df (DataFrame): A DataFrame containing the statistical values for each channel and filter.
+        """
+        stats = ['mean', 'std', 'median', 'min', 'max', 'range', 'variance', 'iqr']
+        data = []
+
+        if type(trail) is tuple:
+            for band_idx, filter_data in enumerate(trail):
+                for channel_idx in range(filter_data.shape[1]):
+                    channel_data = filter_data[:, channel_idx]
+                    mean = np.mean(channel_data)
+                    std = np.std(channel_data)
+                    median = np.median(channel_data)
+                    min_val = np.min(channel_data)
+                    max_val = np.max(channel_data)
+                    range_val = max_val - min_val
+                    variance = np.var(channel_data)
+                    iqr = np.percentile(channel_data, 75) - np.percentile(channel_data, 25)
+
+                    data.append([band_idx, channel_idx, mean, std, median, min_val, max_val, range_val, variance, iqr])
+
+                stats_df = pd.DataFrame(data, columns=['Filter', 'Channel', 'Mean', 'STD', 'Median', 'Min', 'Max',
+                                                       'Range', 'Variance', 'IQR'])
+        else:
+            for channel_idx in range(np.shape(trail)[1]):
+                channel_data = trail[:, channel_idx]
+                mean = np.mean(channel_data)
+                std = np.std(channel_data)
+                median = np.median(channel_data)
+                min_val = np.min(channel_data)
+                max_val = np.max(channel_data)
+                range_val = max_val - min_val
+                variance = np.var(channel_data)
+                iqr = np.percentile(channel_data, 75) - np.percentile(channel_data, 25)
+
+                data.append([self.relevant_name[channel_idx], mean, std, median, min_val, max_val, range_val, variance, iqr])
+
+            stats_df = pd.DataFrame(data, columns=['name', 'Mean', 'STD', 'Median', 'Min', 'Max', 'Range',
+                                                   'Variance', 'IQR'])
+
+        return stats_df
+
+    def plot_rms_multiple(self, rms_values_list, status_list, period_list):
+        """
+        Plot the RMS values for each frequency band for multiple trails.
+
+        Parameters:
+        rms_values_list (list of tuples): A list containing tuples of RMS values for each frequency band for different trails.
+        status_list (list of int): A list containing status values for each trail.
+        period_list (list of int): A list containing period values for each trail.
+
+        Returns:
+        None: The RMS values are plotted.
+        """
+        # Define the frequency bands and their corresponding data from the first trail
+        frequency_bands = ['Alpha', 'Beta', 'Theta', 'Delta', 'emg', 'complementary emg']
+
+        channels = 16
+
+        for band_idx, band in enumerate(frequency_bands):
+            title = f'RMS Values for {band} Band - Multiple Trails'
+            fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
+            fig.suptitle(title, fontsize=16)  # Add title to the plot
+
+            for i in range(channels):
+                for j, (rms_values, status, period) in enumerate(zip(rms_values_list, status_list, period_list)):
+                    # Create a time axis for the RMS values (assuming all trails have the same length)
+                    time = np.arange(0, len(rms_values_list[j][0])) * 0.5
+                    axs[i].plot(time, rms_values[band_idx][:, i],
+                                label=f'Trail {j + 1} - Status: {status}, Period: {period}')
+                axs[i].text(1.02, 0.5, f'Channel {i + 1}', transform=axs[i].transAxes, va='center', ha='left')
+                axs[i].spines['top'].set_visible(False)  # Hide the top spine
+                axs[i].spines['right'].set_visible(False)  # Hide the right spine
+                axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
+                axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
+                axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
+
+            # Adjust settings for the last subplot
+            axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
+            axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
+            axs[-1].set_xlabel("Time [s]")  # Common X-axis title
+            fig.text(0.04, 0.5, 'RMS', va='center', rotation='vertical')  # Common Y-axis title
+
+            # Create a common legend for the figure
+            handles, labels = axs[0].get_legend_handles_labels()
+            plt.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 17.5), ncol=len(rms_values_list))
+
+            plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
+            plt.show(block=False)
+
+    def plot_data(self, trail):
+        """
+        Plots the EMG data on single plot.
+
+        Parameters:
+        trail (list): trail[0] contains the EMG data for the specific level and response status.
+        trail (list): trail[1] contains the timestamps for the EMG data.
+
+        Returns:
+        None: The EMG data is plotted.
+        """
+        # convert to seconds
+        time = trail[1] - trail[1][0]
+        plt.figure()
+        plt.plot(time, trail[0])
+        plt.xlabel('Time (s)')
+        plt.ylabel('EMG (mV)')
+        plt.title('EMG Data')
+        plt.show(block=False)
+        input("Press Enter to keep going...")
+
+    def dft_multichannel(self, nfft, axis=-1):
+        f = np.fft.fftfreq(nfft, 1 / self.fs)
+        f_keep = f > 0
+        f = f[f_keep]
+
+        n_channels = self.data.shape[-1]
+        fft_values = np.zeros((n_channels, len(f)))
+
+        for i in range(n_channels):
+            y = np.abs(np.fft.fft(self.data[:, i], nfft, axis=axis))[f_keep]
+            fft_values[i] = y
+
+        return f, fft_values

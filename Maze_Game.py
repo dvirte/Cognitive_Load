@@ -750,6 +750,9 @@ while True:
     if user_details is not None and user_details['Serial Number'].isdigit() and len(user_details['Serial Number']) == 3:
         break
 
+# Log event for the start of the experiment
+log_event(6, datetime.now().timestamp())
+
 # Perform the calibration
 calibration_screen(screen)
 
@@ -787,9 +790,6 @@ maze, n_back_level, screen_width, screen_height, cell_size, maze_background = \
     setup_level(0, initial_screen_width, initial_screen_height)
 
 instruction_screen_set = pygame.display.set_mode((initial_screen_width, initial_screen_height))
-
-# Log event for the start of the experiment
-log_event(6, datetime.now().timestamp())
 
 # Call the instruction screen with the updated window size
 if not instruction_screen(instruction_screen_set, n_back_level, animal_sound):

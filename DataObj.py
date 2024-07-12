@@ -6,7 +6,8 @@ from load_intan_rhd_format import read_data
 import pandas as pd
 import glob
 import pyxdf as pyxdf
-
+import csv
+import matplotlib.pyplot as plt
 
 
 class DataObj:
@@ -20,6 +21,10 @@ class DataObj:
         self.read_lsl_streams()
         self.check_triggers()
         self.exp_data = self.read_exp_data()
+        self.weights = self.read_weights()
+        self.trail_cog_nasa = self.calculate_cognitive_load()
+        self.sorted_indices = np.argsort(self.trail_cog_nasa)[::-1]
+
 
     @staticmethod
     def create_output_folder(path):
@@ -88,7 +93,46 @@ class DataObj:
 
         try:
             data_df = pd.read_csv(file_path)
-            return data_df.to_dict(orient='list')
+            data_df = data_df.to_dict(orient='list')
+            # Change values of dictionary to numpy arrays
+            for key in data_df.keys():
+                data_df[key] = np.array(data_df[key])
+            data_df['Performance'] = 19 - data_df['Performance']
+            return data_df
         except FileNotFoundError:
             print('No stage_performance.csv file found')
             return None
+
+    def read_weights(self):
+        path = os.path.abspath(os.path.join(self.path, os.pardir))
+        file_path = os.path.join(path, 'nasa_tlx_weights.csv')
+        with open(file_path, mode='r') as file:
+            csv_reader = csv.reader(file)
+            headers = next(csv_reader)  # This is the first row with headers
+            weights = next(csv_reader)  # This is the second row with weights
+
+            # Convert weights from strings to integers
+            weights = list(map(int, weights))
+            total_weight = sum(weights)
+
+            # Normalize the weights
+            normalized_weights = {headers[i]: weights[i] / total_weight for i in range(len(weights))}
+            return normalized_weights
+
+    def calculate_cognitive_load(self):
+        # Calculate the cognitive load based on the NASA-TLX weights
+        cognitive_loads = np.zeros(len(self.exp_data['Effort']))
+        for key in self.weights.keys():
+            cognitive_loads += self.weights[key] * self.exp_data[key]
+        return cognitive_loads
+
+    def plot_nasa_tlx(self):
+        """
+        Plot the NASA TLX values for all the trails
+        """
+        plt.figure()
+        plt.xlabel('Trial')
+        plt.ylabel('Cognitive Load')
+        plt.title('NASA TLX values for all the trails')
+        plt.scatter(range(len(self.trail_cog_nasa)), self.trail_cog_nasa)
+        plt.show(block=False)

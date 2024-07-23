@@ -509,7 +509,7 @@ def setup_level(n_back_level, screen_width, screen_height):
                 n_back_level += 1
                 level_list[0] = 1
             elif level_list[1] == 0:  # Increase the maze size
-                maze_size += 5
+                maze_size = min(maze_size + 5, 50)
                 level_list[1] = 1
             elif level_list[2] == 0:  # Increase the maze complexity
                 level_list[2] = 1
@@ -725,7 +725,6 @@ screen_width = 600
 screen_height = 600
 
 experiment_ended = False  # New variable to control the experiment's end
-experiment_start_time = datetime.now()  # Track the start time of the experiment
 
 # Initialize the screen
 screen = pygame.display.set_mode((screen_width, screen_height))
@@ -782,6 +781,8 @@ speed = 1
 
 # Key state
 key_pressed = None
+
+experiment_start_time = datetime.now()  # Track the start time of the experiment
 
 # Level parameters
 initial_screen_width = 600  # Initial screen dimensions
@@ -901,7 +902,7 @@ while running:
     if is_maze_completed(player_x, player_y, maze):
         # Log event for the end of the level
         log_event(9, datetime.now().timestamp())
-        if (datetime.now() - experiment_start_time).total_seconds() > 3600:
+        if (datetime.now() - experiment_start_time).total_seconds() > 2700: # 45 minutes
             experiment_ended = True
         # set up the new level
         maze, n_back_level, screen_width, screen_height, cell_size, maze_background = \

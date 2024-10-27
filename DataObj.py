@@ -25,7 +25,6 @@ class DataObj:
         self.trail_cog_nasa = self.calculate_cognitive_load()
         self.sorted_indices = np.argsort(self.trail_cog_nasa)[::-1]
 
-
     @staticmethod
     def create_output_folder(path):
         output_folder = path.split(os.path.sep)[-1][:-4]
@@ -135,4 +134,37 @@ class DataObj:
         plt.ylabel('Cognitive Load')
         plt.title('NASA TLX values for all the trails')
         plt.scatter(range(len(self.trail_cog_nasa)), self.trail_cog_nasa)
+        plt.show(block=False)
+
+    def plot_first_10_minutes(self):
+
+        # Get the first 10 minutes of the data
+        ind_10_min = np.where(self.ElectrodeStream['time_stamps'] <
+                              self.ElectrodeStream['time_stamps'][0] + 10 * 60)[0][-1]
+
+        time_series = self.ElectrodeStream['time_series'][:ind_10_min, :]
+        time_stamps = self.ElectrodeStream['time_stamps'][:ind_10_min]
+
+        # Get the trigger times that are within the first 10 minutes
+        trigger_times = self.Trigger_Cog['time_stamps']
+        lsat_sample = time_stamps[-1]
+        last_trigger_index = np.where(trigger_times < lsat_sample)[0][-1]
+        trigger_times = trigger_times[:last_trigger_index]
+        first_sample = time_stamps[0]
+
+        # Adjust the trigger times to be relative to the first sample
+        trigger_times = trigger_times - first_sample
+        time_stamps = time_stamps - first_sample
+
+        plt.figure(figsize=(15, 5))
+        plt.plot(time_stamps, time_series[:, 0])
+
+        # Add vertical red lines for triggers
+        for trigger_time in trigger_times:
+            plt.axvline(x=trigger_time, color='r')
+
+        plt.title('First Channel - First 10 Minutes')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Amplitude')
+        plt.grid(True)
         plt.show(block=False)

@@ -3,11 +3,13 @@ from matplotlib.image import imread
 import numpy as np
 from scipy.signal import iirnotch, filtfilt
 from scipy.signal import butter, filtfilt
+from scipy import signal
+from scipy.fft import fftshift
 import pandas as pd
 
 
 class ExpObj():
-    def __init__(self, emg_data, trigger_stream):
+    def __init__(self, emg_data, trigger_stream, fs=250):
         """
         Initializes the EEGDataProcessor with EEG data, triggers, and timestamps.
 
@@ -20,14 +22,17 @@ class ExpObj():
         self.triggers = trigger_stream['time_series']  # Assuming this is a list of triggers
         self.triggers_time_stamps = trigger_stream['time_stamps']
         self.rest_periods, self.play_periods, self.calibrate_periods = self.find_periods()
-        self.fs = 250
+        self.fs = fs
         self.eeg_data_alpha = self.apply_bandpass_filter(8, 13)
         self.eeg_data_beta = self.apply_bandpass_filter(13, 30)
         self.eeg_data_theta = self.apply_bandpass_filter(4, 7)
         self.eeg_data_delta = self.apply_bandpass_filter(1, 4)
         self.emg_complementary_data = self.apply_bandpass_filter(1, 35)
         self.apply_notch_filters([50, 100])
-        self.emg_data = self.apply_bandpass_filter(35, 124)
+        if fs == 250:
+            self.emg_data = self.apply_bandpass_filter(35, 124)
+        else:
+            self.emg_data = self.apply_bandpass_filter(35, 245)
         self.list_of_elements = ['EEG_alpha', 'EEG_beta', 'EEG_theta', 'EEG_delta', 'EMG', 'EMG_complementary']
         self.relevant_data, self.relevant_name = self.extract_relevant_electrodes()
 
@@ -176,7 +181,6 @@ class ExpObj():
             plt.xlim([0, Fs / 2])  # Show only up to the Nyquist frequency
             plt.grid(True)
             plt.show(block=False)
-            input("Press Enter to keep going...")
 
     def extract_relevant_electrodes(self):
         # Extract electrodes 14-16 for EEG bands and EMG complementary
@@ -209,69 +213,6 @@ class ExpObj():
                              'EMG_ch6', 'EMG_ch5', 'EMG_ch4', 'EMG_ch3', 'EMG_ch2', 'EMG_ch1']
 
         return combined_data, relevant_elements
-
-    def plot_trail(self, trail):
-        """
-        Plots a series of subplots for each channel in the trail data.
-
-        Parameters:
-        - self: The object instance.
-        - trail: A tuple where trail[0] is an ndarray of shape (samples, channels)
-                 representing the data for each channel, and trail[1] is an ndarray
-                 of shape (samples,) representing the timestamps.
-
-        Returns:
-        - None: The plot is displayed.
-        """
-        data, timestamps, triggers, trigger_times = trail[0], trail[1], trail[2], trail[3]
-        trigger_times = trigger_times - timestamps[0]
-        timestamps = timestamps - timestamps[0]  # Convert to seconds
-        status, period, kind = trail[4]
-        samples, channels = data.shape
-
-        # Define the title based on the status and period
-        if status == 0:
-            title = f'{kind} - Rest Period: {period}'
-        elif status == 1:
-            title = f'{kind} - Task Period: {period}'
-        elif status == 2:
-            title = f'{kind} - Calibration'
-
-        # Determine the global min and max values across all channels
-        global_min = np.min(data)
-        global_max = np.max(data)
-
-        fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
-        fig.suptitle(title, fontsize=16)  # Add title to the plot
-
-        for i in range(channels):
-            axs[i].plot(timestamps, data[:, channels - 1 - i])  # Plot each channel
-            axs[i].text(1.02, 0.5, f'EMG {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
-            axs[i].spines['top'].set_visible(False)  # Hide the top spine
-            axs[i].spines['right'].set_visible(False)  # Hide the right spine
-            axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
-            axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
-            axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
-            axs[i].set_ylim(global_min, global_max)  # Set the same Y-axis limits for all subplots
-
-            # Add vertical red lines for triggers
-            for trigger_time in trigger_times:
-                axs[i].axvline(x=trigger_time, color='red', linestyle='--')
-
-        # Add trigger labels on the last subplot
-        for j, trigger_time in enumerate(trigger_times):
-            axs[-1].text(trigger_time, axs[-1].get_ylim()[0] - 0.05 * (axs[-1].get_ylim()[1] - axs[-1].get_ylim()[0]),
-                         f'Trigger {int(triggers[j])}', color='red', ha='center', va='top', rotation=90)
-
-        # Adjust settings for the last subplot
-        axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
-        axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
-        axs[-1].set_xlabel("Time [s]")  # Common X-axis title
-        fig.text(0.04, 0.5, 'Amplitude [mV]', va='center', rotation='vertical')  # Common Y-axis title
-
-        plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
-        plt.show(block=False)
-        input("Press Enter to keep going...")
 
     def apply_notch_filters(self, freqs, quality_factor=30):
         """
@@ -378,70 +319,6 @@ class ExpObj():
 
             return stat_alpha, stat_beta, stat_theta, stat_delta, stat_emg, stat_emg_complementary
 
-    def plot_stat(self, stat_values, status, period, kind='RMS', specific_bands=None):
-        """
-        Plot the statistical values for each frequency band.
-
-        Parameters:
-        stat_values (tuple): The statistical values for each frequency band.
-        status (int): 0 for rest, 1 for task, 2 for calibration.
-        period (int): the specific period to extract the data from.
-
-        Returns:
-        None: The statistical values are plotted.
-        """
-        stat_alpha, stat_beta, stat_theta, stat_delta, stat_emg, stat_emg_complementary = stat_values
-
-        # Create a time axis for the RMS values
-        time = np.arange(0, len(stat_alpha)) * 0.25
-
-        # Define the title based on the status and period
-        channels = 16
-
-        all_frequency_bands = {
-            'Alpha': stat_alpha,
-            'Beta': stat_beta,
-            'Theta': stat_theta,
-            'Delta': stat_delta,
-            'EMG': stat_emg,
-            'EMG_complementary': stat_emg_complementary
-        }
-
-        if specific_bands is None:
-            frequency_bands = all_frequency_bands
-        else:
-            frequency_bands = {band: all_frequency_bands[band] for band in specific_bands if
-                               band in all_frequency_bands}
-
-        for band, data in frequency_bands.items():
-            title = f'{kind} Values for {band} Band - Status: {status}, Period: {period}'
-            fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
-            fig.suptitle(title, fontsize=16)  # Add title to the plot
-
-            # Determine the global min and max values across all channels
-            global_min = np.min(data)
-            global_max = np.max(data)
-
-            for i in range(channels):
-                axs[i].plot(time, data[:, channels - 1 - i])
-                axs[i].text(1.02, 0.5, f'Channel {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
-                axs[i].spines['top'].set_visible(False)  # Hide the top spine
-                axs[i].spines['right'].set_visible(False)  # Hide the right spine
-                axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
-                axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
-                axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
-                axs[i].set_ylim(global_min, global_max)  # Set the same Y-axis limits for all subplots
-
-            # Adjust settings for the last subplot
-            axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
-            axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
-            axs[-1].set_xlabel("Time [s]")  # Common X-axis title
-            fig.text(0.04, 0.5, 'RMS', va='center', rotation='vertical')  # Common Y-axis title
-
-            plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
-            plt.show(block=False)
-        input("Press Enter to keep going...")
-
     def extract_statistics(self, trail):
         """
         Extract statistical values for each filter in the trail.
@@ -492,75 +369,6 @@ class ExpObj():
 
         return stats_df
 
-    def plot_rms_multiple(self, rms_values_list, status_list, period_list):
-        """
-        Plot the RMS values for each frequency band for multiple trails.
-
-        Parameters:
-        rms_values_list (list of tuples): A list containing tuples of RMS values for each frequency band for different trails.
-        status_list (list of int): A list containing status values for each trail.
-        period_list (list of int): A list containing period values for each trail.
-
-        Returns:
-        None: The RMS values are plotted.
-        """
-        # Define the frequency bands and their corresponding data from the first trail
-        frequency_bands = ['Alpha', 'Beta', 'Theta', 'Delta', 'emg', 'complementary emg']
-
-        channels = 16
-
-        for band_idx, band in enumerate(frequency_bands):
-            title = f'RMS Values for {band} Band - Multiple Trails'
-            fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
-            fig.suptitle(title, fontsize=16)  # Add title to the plot
-
-            for i in range(channels):
-                for j, (rms_values, status, period) in enumerate(zip(rms_values_list, status_list, period_list)):
-                    # Create a time axis for the RMS values (assuming all trails have the same length)
-                    time = np.arange(0, len(rms_values_list[j][0])) * 0.5
-                    axs[i].plot(time, rms_values[band_idx][:, i],
-                                label=f'Trail {j + 1} - Status: {status}, Period: {period}')
-                axs[i].text(1.02, 0.5, f'Channel {i + 1}', transform=axs[i].transAxes, va='center', ha='left')
-                axs[i].spines['top'].set_visible(False)  # Hide the top spine
-                axs[i].spines['right'].set_visible(False)  # Hide the right spine
-                axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
-                axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
-                axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
-
-            # Adjust settings for the last subplot
-            axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
-            axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
-            axs[-1].set_xlabel("Time [s]")  # Common X-axis title
-            fig.text(0.04, 0.5, 'RMS', va='center', rotation='vertical')  # Common Y-axis title
-
-            # Create a common legend for the figure
-            handles, labels = axs[0].get_legend_handles_labels()
-            plt.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, 17.5), ncol=len(rms_values_list))
-
-            plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
-            plt.show(block=False)
-
-    def plot_data(self, trail):
-        """
-        Plots the EMG data on single plot.
-
-        Parameters:
-        trail (list): trail[0] contains the EMG data for the specific level and response status.
-        trail (list): trail[1] contains the timestamps for the EMG data.
-
-        Returns:
-        None: The EMG data is plotted.
-        """
-        # convert to seconds
-        time = trail[1] - trail[1][0]
-        plt.figure()
-        plt.plot(time, trail[0])
-        plt.xlabel('Time (s)')
-        plt.ylabel('EMG (mV)')
-        plt.title('EMG Data')
-        plt.show(block=False)
-        input("Press Enter to keep going...")
-
     def dft_multichannel(self, nfft, axis=-1):
         f = np.fft.fftfreq(nfft, 1 / self.fs)
         f_keep = f > 0
@@ -574,3 +382,57 @@ class ExpObj():
             fft_values[i] = y
 
         return f, fft_values
+
+    def plot_multiple_channels(self, trail_emg, trail_eeg, bands_names, channel_list=None):
+        """
+        Plot the EMG and EEG data of the given channels
+
+        :param trail_emg: EMG data of the trail
+        :param trail_eeg: EEG data of the trail
+        :param bands_names: Names of the bands
+        :param channel_list: List of channels to plot
+        """
+
+        if channel_list is not None:
+            for i in channel_list:
+                fig, axs = plt.subplots(2, 1, figsize=(15, 10))
+
+                # Plot the EMG data
+                axs[0].plot(trail_emg[1], trail_emg[0][:, i])
+                axs[0].set_title(bands_names[0])
+                axs[0].set_xlabel('Time (s)')
+                axs[0].set_ylabel('Amplitude')
+                axs[0].grid(True)
+                axs[0].set_title(bands_names[0])
+
+                # Plot the EEG data
+                axs[1].plot(trail_eeg[1], trail_eeg[0][:, i])
+                axs[1].set_title(bands_names[1])
+                axs[1].set_xlabel('Time (s)')
+                axs[1].set_ylabel('Amplitude')
+                axs[1].grid(True)
+                axs[1].set_title(bands_names[1])
+
+                fig.suptitle('Channel ' + str(i))
+                plt.show(block=False)
+
+                # Plot spectrogram of the EMG and EEG data
+                plt.figure(figsize=(10, 6))
+                f, t, Sxx = signal.spectrogram(trail_emg[0][:, i], self.fs)
+                plt.pcolormesh(t, f, Sxx, shading='gouraud')
+                plt.ylabel('Frequency [Hz]')
+                plt.xlabel('Time [sec]')
+                plt.title('EMG Spectrogram - Channel ' + str(i))
+                plt.show(block=False)
+
+                plt.figure(figsize=(10, 6))
+                f, t, Sxx = signal.spectrogram(trail_eeg[0][:, i], self.fs)
+                plt.pcolormesh(t, f, Sxx, shading='gouraud')
+                plt.ylabel('Frequency [Hz]')
+                plt.xlabel('Time [sec]')
+                plt.title('EEG Spectrogram - Channel ' + str(i))
+
+            plt.show(block=False)
+
+        else:
+            print('Please provide a list of channels to plot')

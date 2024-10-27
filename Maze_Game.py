@@ -34,23 +34,31 @@ pygame.mixer.init()
 #    11: 'Indicates start of the NASA-TLX rating'
 #    12: 'Indicates end of the NASA-TLX rating'
 #    13: 'Indicates for calibration: start blinking'
-#    14: 'Indicates for calibration: start resting eyebrows'
-#    15: 'Indicates for calibration: start yawning'
-#    16: 'Indicates for calibration: start nodding negative'
+#    14: 'Indicates for calibration: start jaw stiffness'
+#    15: 'Indicates for calibration: start frowning'
+#    16: 'Indicates for calibration: start yawning'
 #    17: 'Indicates for calibration: start calibration'
 #    18: 'Indicates for calibration: end calibration'
+#    19: 'Indicates that the participant skipped the maze in the middle.'
+#    20: 'Indicates that a new maze is started because the previous maze was completed in less than 1.5 minutes.'
 # }
 
 experiment_data = []  # Initialize an empty list to store event data
 maze_size = 5  # Initial maze size
 current_threshold = 0.3  # Initial error threshold
 maze_complexity = 0.8  # Initial maze complexity
-animal_sound = False  # The n-back task only takes into account if the sound played is from animals and not inanimate
+animal_sound = True  # The n-back task only takes into account if the sound played is from animals and not inanimate
 level_list = [0, 0, 0]  # List to keep track of which aspect to increase next
 performance_ratios = {'TP': [], 'FP': [], 'start': [], 'end': []}  # Initialize performance ratios
 stage_performance = []  # Initialize list to store high error performance
 path_of_maze = [] # Initialize list to store the path of the maze
 baseline_maze = 0  # Play 10 levels of maze without any n-back task
+amount_of_levels = 10  # Amount of levels to play before starting the N-back task
+
+# Initialize sound delay
+sound_delay = 500  # Initial delay between sounds in milliseconds (0.5 seconds)
+min_sound_delay = 500  # Minimum delay (0.5 seconds)
+max_sound_delay = 5000  # Maximum delay (5 seconds)
 
 
 def log_event(trigger_id, timestamp):
@@ -63,21 +71,26 @@ def log_event(trigger_id, timestamp):
     print(f"Trigger {trigger_id}")
 
 
-def display_text(screen, text, position, font_size=50, color=(255, 255, 255)):
+def display_text(screen, text, font_size=50, color=(255, 255, 255), y_offset=0):
     font = pygame.font.Font(None, font_size)
     text_surface = font.render(text, True, color)
-    rect = text_surface.get_rect(center=position)
+    # Set the text position dynamically with a vertical offset
+    rect = text_surface.get_rect(center=(screen_width // 2, (screen_height // 2) + y_offset))
     screen.blit(text_surface, rect)
 
 
-def draw_text(surface, text, position, font_size=32, color=(255, 255, 255), center=False):
+def draw_text(surface, text, x, y, font_size=32, color=(255, 255, 255), center=False):
     font = pygame.font.Font(None, font_size)
     text_surface = font.render(text, True, color)
     text_rect = text_surface.get_rect()
+
     if center:
-        text_rect.center = position
+        # Center the text horizontally around the x and place it at the y position
+        text_rect.center = (x, y)
     else:
-        text_rect.topleft = position
+        # Place text at the top left corner of the x, y
+        text_rect.topleft = (x, y)
+
     surface.blit(text_surface, text_rect)
 
 
@@ -103,9 +116,16 @@ def input_screen():
                         user_details[current_input] += event.unicode
 
         screen.fill((0, 0, 0))  # Clear screen with black
-        draw_text(screen, "Enter Participant Serial Number", (320, 50), center=True)
-        draw_text(screen, "and then press Enter", (320, 80), center=True)
-        draw_text(screen, f"Serial Number: {user_details['Serial Number']}", (320, 200), center=True)
+
+        # Calculate positions dynamically based on screen height
+        title_y = screen_height // 3
+        instruction_y = title_y + 50  # Adjust the spacing between lines
+        input_y = instruction_y + 150
+
+        # Draw text centered horizontally
+        draw_text(screen, "Enter Participant Serial Number", screen_width // 2, title_y, center=True, font_size=50)
+        draw_text(screen, "and then press Enter", screen_width // 2, instruction_y, center=True, font_size=50)
+        draw_text(screen, f"Serial Number: {user_details['Serial Number']}", screen_width // 2, input_y, center=True, font_size=50)
 
         pygame.display.flip()
         pygame.time.Clock().tick(30)
@@ -115,9 +135,9 @@ def welcome_screen(screen):
     running = True
     while running:
         screen.fill((0, 0, 0))
-        display_text(screen, "Welcome to the Experiment", (screen_width // 2, screen_height // 3))
-        display_text(screen, "Press Enter to continue", (screen_width // 2, screen_height // 2))
-        display_text(screen, "or Escape to exit", (screen_width // 2, screen_height // 1.7))
+        display_text(screen, "Welcome to the Experiment", font_size=50, y_offset=-100)  # Move this line up
+        display_text(screen, "Press Enter to continue", font_size=40, y_offset=20)       # Centered
+        display_text(screen, "or Escape to exit", font_size=40, y_offset=90)           # Move this line down
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
@@ -167,7 +187,7 @@ def calibration_screen(screen):
         if start_trigger_id != 17:
             # Display the action slide
             screen.fill((0, 0, 0))  # Clear screen
-            display_text(screen, "Please wait for the beep.", (screen_width // 2, screen_height // 2))
+            display_text(screen, "Please wait for the beep.", font_size=40, y_offset=0)  # Centered text
             pygame.display.flip()
             pygame.time.wait(2500)  # Wait for 5 seconds
 
@@ -186,9 +206,9 @@ def calibration_screen(screen):
     # Calibration steps
     calibration_steps = [
         (["Every time a beep sound is heard,", "please blink.", "", "To start, press Enter."], 13),
-        (["Every time a beep sound is heard,", " please raise your eyebrows.", "", "To start, press Enter."], 14),
-        (["Every time a beep sound is heard,", " please yawn.", "", "To start, press Enter."], 15),
-        (["Every time a beep sound is heard,", " please nod negatively.", "", "To start, press Enter."], 16)]
+        (["Every time a beep sound is heard,", " please stiffen your jaw.", "", "To start, press Enter."], 14),
+        (["Every time a beep sound is heard,", " please frown.", "", "To start, press Enter."], 15),
+        (["Every time a beep sound is heard,", " please yawn.", "", "To start, press Enter."], 16)]
 
     for instruction_text, start_trigger_id in calibration_steps:
         display_calibration_instruction(instruction_text, start_trigger_id)
@@ -202,10 +222,10 @@ def instruction_screen(screen, n_back_level, animal_sound):
     screen.fill((0, 0, 0))  # Clear screen
 
     # Text settings
-    font_size = 40  # Adjust font size for clarity and fit
+    font_size = 60  # Adjusted font size for readability
     font = pygame.font.Font(None, font_size)
     color = (255, 255, 255)  # White color for text
-    line_spacing = 10  # Spacing between lines
+    line_spacing = 30  # Spacing between lines
 
     # Instruction Text
     instructions = ["Navigate through the maze to find the exit.", ""]
@@ -215,23 +235,23 @@ def instruction_screen(screen, n_back_level, animal_sound):
         instructions.append("If a sound is the same as one you heard ")
         instructions.append(f"{n_back_level} steps ago,")
         if animal_sound:
-            winsound.Beep(2500, 500)
-            instructions.append("and!! it's an animal sound,")
-            instructions.append("press SPACEBAR.")
-        else:
-            instructions.append("press SPACEBAR regardless of its type.")
+            instructions.append("and it's an animal sound,")
+        instructions.append("press SPACEBAR.")
     instructions.append(" ")
     instructions.append("Press SPACEBAR to start the level.")
 
     # Calculate the total height of the text block
     total_height = (font_size + line_spacing) * len(instructions) - line_spacing
 
-    # Calculate the starting y position to vertically center the text
+    # Calculate the starting y position to vertically center the text block
     start_y = (screen_height - total_height) // 2
 
     for i, text in enumerate(instructions):
+        # Render each line of text
         text_surface = font.render(text, True, color)
-        rect = text_surface.get_rect(center=(screen_width // 2, start_y + i * (font_size + line_spacing)))
+        # Get the rectangle of the text and explicitly center it horizontally and position vertically
+        rect = text_surface.get_rect()  # Get rect without centering yet
+        rect.center = (screen_width // 2, start_y + i * (font_size + line_spacing))  # Center horizontally
         screen.blit(text_surface, rect)
 
     pygame.display.flip()
@@ -289,13 +309,11 @@ def nasa_tlx_rating_screen():
     log_event(11, datetime.now().timestamp())
 
     # Define screen properties
-    screen_width = 800
-    screen_height = 600
     screen = pygame.display.set_mode((screen_width, screen_height))
     pygame.display.set_caption("NASA-TLX Rating")
-    title_font = pygame.font.Font(None, 32)  # Larger font for the title
-    # Define a new font size that is smaller to save space
-    small_font_size = 22
+    title_font_size = 48  # Increase the title font size for more prominence
+    title_font = pygame.font.Font(None, title_font_size)
+    small_font_size = 30  # Increase font size for the scales
     small_font = pygame.font.Font(None, small_font_size)
 
     # Define colors
@@ -312,61 +330,59 @@ def nasa_tlx_rating_screen():
     title = "NASA-TLX Rating"
 
     def draw_scales():
-        # Draw title at the original position
+        # Draw title with more space from the top
         title_surface = title_font.render(title, True, WHITE)
-        screen.blit(title_surface, (screen_width // 2 - title_surface.get_width() // 2, 10))
+        screen.blit(title_surface, (screen_width // 2 - title_surface.get_width() // 2, 50))  # 50px padding from top
 
-        # Calculate the vertical centering for the scales
-        total_content_height = len(categories) * 80  # Assuming 80 pixels per category
-        start_y_position = (screen_height - total_content_height) // 2
+        # Calculate the vertical centering for the scales, increase space between scales
+        total_content_height = len(categories) * 120  # Increase spacing between categories
+        start_y_position = (screen_height - total_content_height) // 2 + 50  # Add margin for title
 
-        # Center the scales horizontally
+        # Draw scales and labels
         for i, category in enumerate(categories):
-            y_position = start_y_position + i * 80  # Spacing between questions
+            y_position = start_y_position + i * 120  # Adjusted spacing between questions
             text_label = small_font.render(category, True, WHITE)
 
-            # Find the center of the text label relative to the screen width
+            # Center the text label relative to the screen width
             text_x_position = screen_width // 2 - text_label.get_width() // 2
             screen.blit(text_label, (text_x_position, y_position))
 
             # Draw the scale line centered
-            line_start_x = screen_width // 2 - 250  # Line starting position adjusted for centering
-            line_end_x = screen_width // 2 + 250  # Line ending position adjusted for centering
-            pygame.draw.line(screen, WHITE, (line_start_x, y_position + 30), (line_end_x, y_position + 30), 2)
+            line_start_x = screen_width // 2 - 350  # Increase line length for the scale
+            line_end_x = screen_width // 2 + 350
+            pygame.draw.line(screen, WHITE, (line_start_x, y_position + 40), (line_end_x, y_position + 40), 4)  # Thicker line
 
             # Calculate the position for the scale marker based on the current scale value
-            marker_pos_x = line_start_x + (scale_values[category] * (500 / 19))
-            pygame.draw.circle(screen, GREEN, (int(marker_pos_x), y_position + 30), 10)
+            marker_pos_x = line_start_x + (scale_values[category] * (700 / 19))  # Adjust for longer line
+            pygame.draw.circle(screen, GREEN, (int(marker_pos_x), y_position + 40), 15)  # Larger marker
 
             # Place "Very Low" and "Very High" labels at the ends of the scale line
             low_text = small_font.render("Very Low", True, WHITE)
             high_text = small_font.render("Very High", True, WHITE)
 
             # Draw the "Very Low" and "Very High" text aligned with the scale line ends
-            screen.blit(low_text, (line_start_x, y_position + 50))
-            screen.blit(high_text, (line_end_x - high_text.get_width(), y_position + 50))
+            screen.blit(low_text, (line_start_x, y_position + 60))
+            screen.blit(high_text, (line_end_x - high_text.get_width(), y_position + 60))
 
     def handle_mouse_click(pos):
-
-        # Calculate the vertical centering for the scales
-        total_content_height = len(categories) * 80  # Assuming 80 pixels per category
-        start_y_position = (screen_height - total_content_height) // 2
+        total_content_height = len(categories) * 120  # Adjusted for new spacing
+        start_y_position = (screen_height - total_content_height) // 2 + 50
 
         for i, category in enumerate(categories):
-            y_position = start_y_position + i * 80  # Ensure this matches the draw_scales logic
-            line_start_x = screen_width // 2 - 250  # Line starting position adjusted for centering
-            line_end_x = screen_width // 2 + 250  # Line ending position adjusted for centering
+            y_position = start_y_position + i * 120
+            line_start_x = screen_width // 2 - 350
+            line_end_x = screen_width // 2 + 350
 
             # The clickable area for each scale
-            clickable_area_start_y = y_position + 20  # Slightly above the line
-            clickable_area_end_y = y_position + 40  # Slightly below the line
+            clickable_area_start_y = y_position + 30  # Adjust based on new scale position
+            clickable_area_end_y = y_position + 50
 
             if line_start_x <= pos[0] <= line_end_x and clickable_area_start_y <= pos[1] <= clickable_area_end_y:
-                scale_values[category] = round((pos[0] - line_start_x) / (500 / 19))
+                scale_values[category] = round((pos[0] - line_start_x) / (700 / 19))  # Adjust for new scale width
                 return
 
     # Position and draw the "Continue" button
-    continue_button = pygame.Rect(screen_width // 2 - 50, screen_height - 80, 100, 40)  # Adjusted size and position
+    continue_button = pygame.Rect(screen_width // 2 - 50, screen_height - 120, 120, 50)  # Move button up a bit
 
     running = True
     while running:
@@ -386,31 +402,34 @@ def nasa_tlx_rating_screen():
         # Draw the "Continue" button
         pygame.draw.rect(screen, RED, continue_button)
         continue_text = small_font.render('Continue', True, WHITE)
-        screen.blit(continue_text, (continue_button.x + 5, continue_button.y + 5))
+        screen.blit(continue_text, (continue_button.x + 10, continue_button.y + 10))
 
         pygame.display.flip()
 
+    # Save scale values after completing the rating
     for scale in categories:
         stage_performance[-1][scale] = scale_values[scale]
+
     # Log event for the end of the NASA-TLX rating
     log_event(12, datetime.now().timestamp())
 
 
 def calculate_nasa_weight():
-    screen = pygame.display.set_mode((800, 600))
+    # Set the display to full screen
+    screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+    screen_width, screen_height = screen.get_size()  # Update dimensions to the full screen size
     pygame.display.set_caption("NASA-TLX Weight Calculation")
 
     categories = ["Mental Demand", "Performance", "Effort", "Frustration"]
     comparisons = [(i, j) for i in categories for j in categories if i < j]
     results = {category: 0 for category in categories}
-    # shuffle the comparisons to avoid order bias
+    # Shuffle the comparisons to avoid order bias
     random.shuffle(comparisons)
 
-    try:
-        font = pygame.font.Font(None, 36)
-    except:
-        pygame.init()
-        font = pygame.font.Font(None, 36)
+    # Larger font size for better readability in full screen
+    font = pygame.font.Font(None, 60)  # Increased font size
+    question_font = pygame.font.Font(None, 80)  # Larger font for the question
+
     WHITE = (255, 255, 255)
 
     def draw_option(text, position):
@@ -426,13 +445,17 @@ def calculate_nasa_weight():
 
         screen.fill((0, 0, 0))
         question = "Which had a greater impact on your workload?"
-        draw_option(question, (400, 100))
+        # Center the question at the top part of the screen
+        question_surface = question_font.render(question, True, WHITE)
+        question_rect = question_surface.get_rect(center=(screen_width // 2, screen_height // 4))
+        screen.blit(question_surface, question_rect)
 
         comparison = [comparison[0], comparison[1]]
         random.shuffle(comparison)
 
-        left_option = draw_option(comparison[0], (200, 300))
-        right_option = draw_option(comparison[1], (600, 300))
+        # Center the options on the screen
+        left_option = draw_option(comparison[0], (screen_width // 3, screen_height // 2))
+        right_option = draw_option(comparison[1], (2 * screen_width // 3, screen_height // 2))
 
         pygame.display.flip()
 
@@ -475,51 +498,60 @@ def load_maze_from_file(dim):
     return np.array(maze_array)  # Convert back to a numpy array if needed
 
 
-def setup_level(n_back_level, screen_width, screen_height):
-    global experiment_ended, maze_size, maze_complexity, animal_sound, \
-        level_list, stage_performance, baseline_maze, path_of_maze
+def setup_level(n_back_level, screen_width, screen_height, adjust_levels=True):
+    global maze_size, maze_complexity, animal_sound, \
+        level_list, stage_performance, baseline_maze, path_of_maze, amount_of_levels, sound_delay
 
-    amount_of_levels = 10  # Amount of levels to play before starting the N-back task
+    if adjust_levels:
 
-    if baseline_maze < amount_of_levels + 2:
-        baseline_maze += 1
-        # Structured increase in difficulty for the training phase
-        if baseline_maze <= 4:
-            maze_size = 5  # First 4 rounds with maze size 5
-        elif 5 <= baseline_maze <= 7:
-            maze_size = 10  # Next 3 rounds with maze size 10
-        elif 8 <= baseline_maze <= 10:
-            maze_size = 15  # Last 3 rounds with maze size 15
-        else:
-            maze_size = 5  # Default to 5 for rounds beyond the specified training phase
-    if baseline_maze > 1:
-        # Analyze the latest performance from experiment_data
-        # Placeholder for performance analysis logic
-        error_rate, adjusted_threshold = analyze_performance()
-        stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': error_rate,
-                                  'n_back_level': n_back_level, 'maze_size': maze_size,
-                                  'animal_sound': animal_sound, "path_of_maze": path_of_maze[-1]})
-        print(f"Performance error: {error_rate}")
-
-        # Logic to decide on increasing difficulty or ending the experiment
-        if error_rate <= adjusted_threshold and baseline_maze == amount_of_levels+2:
-            # Decide which aspect to increase: This is a simplified example; implement your own logic
-            if level_list[0] == 0:  # Increase the N-back level
-                animal_sound = False
-                n_back_level += 1
-                level_list[0] = 1
-            elif level_list[1] == 0:  # Increase the maze size
-                maze_size = min(maze_size + 5, 50)
-                level_list[1] = 1
-            elif level_list[2] == 0:  # Increase the maze complexity
-                level_list[2] = 1
+        if baseline_maze < amount_of_levels + 2:
+            baseline_maze += 1
+            # Structured increase in difficulty for the training phase
+            if baseline_maze <= 4:
+                maze_size = 5  # First 4 rounds with maze size 5
+            elif 5 <= baseline_maze <= 7:
+                maze_size = 10  # Next 3 rounds with maze size 10
+            elif 8 <= baseline_maze <= 10:
+                maze_size = 15  # Last 3 rounds with maze size 15
             else:
-                animal_sound = True
-                level_list = [0, 0, 0]  # Reset the level list
-        elif error_rate > adjusted_threshold:
-            # send trigger to indicate that the subject has high error rates
-            log_event(10, datetime.now().timestamp())
+                maze_size = 5  # Default to 5 for rounds beyond the specified training phase
+        if baseline_maze > 1:
+            # Analyze the latest performance from experiment_data
+            # Placeholder for performance analysis logic
+            error_rate, adjusted_threshold = analyze_performance()
+            stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': error_rate,
+                                      'n_back_level': n_back_level, 'maze_size': maze_size,
+                                      'animal_sound': animal_sound, "path_of_maze": path_of_maze[-1],
+                                      'sound_delay': sound_delay})
+            print(f"Performance error: {error_rate}")
 
+            # Logic to decide on increasing difficulty or ending the experiment
+            if error_rate <= adjusted_threshold and baseline_maze == amount_of_levels+2:
+                # Decide which aspect to increase: This is a simplified example; implement your own logic
+                if level_list[0] == 0:  # Increase the N-back level
+                    animal_sound = True
+                    n_back_level += 1
+                    level_list[0] = 1
+                elif level_list[1] == 0:  # Increase the maze size
+                    maze_size = min(maze_size + 5, 50)
+                    level_list[1] = 1
+                elif level_list[2] == 0:  # Increase the maze complexity
+                    level_list[2] = 1
+                else:
+                    animal_sound = False
+                    level_list = [0, 0, 0]  # Reset the level list
+
+                if error_rate < 0.8 * adjusted_threshold:
+                    # Decrease the delay between sounds by 0.5 seconds, down to the minimum
+                    sound_delay = max(sound_delay - 500, min_sound_delay)
+                    print("sound delay decreased")
+
+            elif error_rate > adjusted_threshold:
+                # send trigger to indicate that the subject has high error rates
+                log_event(10, datetime.now().timestamp())
+                # Increase the delay between sounds by 0.5 seconds, up to the maximum
+                sound_delay = min(sound_delay + 500, max_sound_delay)
+                print("sound delay increased")
 
     # Adjusted code to load the maze instead of generating a new one
     maze = load_maze_from_file(maze_size)
@@ -529,14 +561,14 @@ def setup_level(n_back_level, screen_width, screen_height):
     maze_height = maze.shape[0]
     cell_size = min(screen_width // maze_width, screen_height // maze_height)
 
-    # Recalculate the screen dimensions to fit the maze
-    screen_width = cell_size * maze_width
-    screen_height = cell_size * maze_height
+    # Calculate the offsets to center the maze
+    offset_x = (screen_width - maze_width * cell_size) // 2
+    offset_y = (screen_height - maze_height * cell_size) // 2
 
     # Create the maze background for the new level
     maze_background = create_maze_background(maze, cell_size)
 
-    return maze, n_back_level, screen_width, screen_height, cell_size, maze_background
+    return maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y
 
 
 def calculate_performance_ratio(current_stat, prev_stat):
@@ -665,6 +697,66 @@ def is_maze_completed(player_x, player_y, maze):  # check if the player reached 
         return False
 
 
+def complete_maze():
+    global maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y
+    global key_pressed, sound_sequence, player_x, player_y, running, screen, stage_start_time
+
+    # Log event for the end of the level
+    log_event(9, datetime.now().timestamp())
+
+    # Reset the key state to avoid unintended movement
+    key_pressed = None  # Reset key state
+
+    # Calculate the elapsed time for the current maze
+    elapsed_time = (datetime.now() - stage_start_time).total_seconds()
+
+    if (datetime.now() - experiment_start_time).total_seconds() > 2700:  # 45 minutes
+        # experiment ended
+        # Save data before exiting after completing all levels
+        save_data_and_participant_info(experiment_data, user_details, stage_performance)
+        running = False  # Set running to False to exit the game loop
+        return  # End the function
+
+    elif elapsed_time < 60 and baseline_maze >= amount_of_levels + 2:  # Less than 1 minute
+        # Log event indicating a new maze is started due to quick completion
+        log_event(20, datetime.now().timestamp())  # Trigger ID 20
+
+        # Set up a new maze with the same parameters without changing levels or showing rating screen
+        maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y = \
+            setup_level(n_back_level, screen_width, screen_height, adjust_levels=False)
+
+    else:
+        # Set up the new level
+        maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y = \
+            setup_level(n_back_level, screen_width, screen_height, adjust_levels=True)
+
+        # Call the rating screen function after a maze is completed
+        nasa_tlx_ratings = nasa_tlx_rating_screen()
+
+        # Reset the sound sequence for the new level
+        sound_sequence = []
+
+        # Change the screen size back to instruction screen size
+        instruction_screen_set = pygame.display.set_mode((screen_width, screen_height))
+
+        # Call the instruction screen with the updated window size
+        if not instruction_screen(instruction_screen_set, n_back_level, animal_sound):
+            exit()  # Exit if the user closes the window or presses ESCAPE
+
+
+        # Record the start time of the new stage
+        stage_start_time = datetime.now()  # Add this line
+
+    # Log event for the start of a new level
+    log_event(4, datetime.now().timestamp())
+
+    # Adjust the    screen dimensions to fit the new maze
+    screen = pygame.display.set_mode((screen_width, screen_height))
+
+    # Reset player position and other necessary variables for the new level
+    player_x, player_y = 0, 1  # Reset player position to the start of the maze
+
+
 def save_data_and_participant_info(experiment_data, user_details, stage_performance):
     weights = calculate_nasa_weight()
     serial_number = user_details['Serial Number']
@@ -717,27 +809,16 @@ sound_sequence = []  # Reset for the new level
 time_since_last_sound = 0  # Time elapsed since the last sound played
 sound_duration = 0  # Duration of the currently playing sound
 sound_end_time = 0  # The calculated end time for the current sound
-post_sound_delay = 500  # 0.5 seconds delay after the sound ends
 sound_to_play_next = True  # Flag to control when the next sound can be played
 
-# Screen dimensions (constant size)
-screen_width = 600
-screen_height = 600
-
-experiment_ended = False  # New variable to control the experiment's end
-
 # Initialize the screen
-screen = pygame.display.set_mode((screen_width, screen_height))
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+screen_width, screen_height = screen.get_size()  # Update dimensions to the full screen size
 pygame.display.set_caption("Maze experiment")
 
 # Show welcome screen
 if not welcome_screen(screen):
     exit()
-
-# Define the screen size
-screen_width = 640
-screen_height = 480
-screen = pygame.display.set_mode((screen_width, screen_height))
 
 # Initialize pygame
 pygame.display.set_caption("User Details Input")
@@ -752,8 +833,8 @@ while True:
 # Log event for the start of the experiment
 log_event(6, datetime.now().timestamp())
 
-# Perform the calibration
-calibration_screen(screen)
+# # Perform the calibration
+# calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze
@@ -768,11 +849,6 @@ maze_width = 2 * dim + 1
 maze_height = 2 * dim + 1
 cell_size = min(screen_width // maze_width, screen_height // maze_height)
 
-# Adjust screen dimensions to fit the maze exactly
-screen_width = cell_size * maze_width
-screen_height = cell_size * maze_height
-screen = pygame.display.set_mode((screen_width, screen_height))
-
 # Player position - starting at the entrance of the maze
 player_x, player_y = 0, 1  # Adjusted to start at the maze entrance
 
@@ -785,15 +861,11 @@ key_pressed = None
 experiment_start_time = datetime.now()  # Track the start time of the experiment
 
 # Level parameters
-initial_screen_width = 600  # Initial screen dimensions
-initial_screen_height = 600
-maze, n_back_level, screen_width, screen_height, cell_size, maze_background = \
-    setup_level(0, initial_screen_width, initial_screen_height)
-
-instruction_screen_set = pygame.display.set_mode((initial_screen_width, initial_screen_height))
+maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y = \
+    setup_level(0, screen_width, screen_height)
 
 # Call the instruction screen with the updated window size
-if not instruction_screen(instruction_screen_set, n_back_level, animal_sound):
+if not instruction_screen(screen, n_back_level, animal_sound):
     exit()  # Exit if the user closes the window or presses ESCAPE
 
 screen = pygame.display.set_mode((screen_width, screen_height))
@@ -822,6 +894,9 @@ last_move_time = 0  # track the last move time
 # Log event for the start of a new level
 log_event(4, datetime.now().timestamp())
 
+# Record the start time of the first stage
+stage_start_time = datetime.now()
+
 # Main game loop
 while running:
     # Reset the response flag for the new interval
@@ -833,6 +908,20 @@ while running:
             running = False
         elif event.type == pygame.KEYDOWN:
             key_pressed = event.key
+            if event.key == pygame.K_e:     # Handle 'E' key press to skip the stage
+                # Check if at least 5 minutes have passed since the stage started
+                elapsed_time = (datetime.now() - stage_start_time).total_seconds()
+                if elapsed_time >= 300:  # 300 seconds = 5 minutes
+                    # Send unique trigger to signify that the user has stopped the maze in the middle.
+                    log_event(19, datetime.now().timestamp())  # Trigger ID 19
+                    # Simulate the maze completion
+                    complete_maze()
+                    pygame.display.flip()
+                    pygame.time.Clock().tick(30)  # Limit to 30 frames per second
+                    continue  # Go to next iteration of the loop
+                else:
+                    # Optionally provide feedback to the participant
+                    print("You cannot skip the maze before 5 minutes have passed.")
         elif event.type == pygame.KEYUP:
             if event.key == key_pressed:
                 key_pressed = None
@@ -849,7 +938,7 @@ while running:
             expected_response = False  # Reset for the next sound
 
     # Blit the maze background
-    screen.blit(maze_background, (0, 0))
+    screen.blit(maze_background, (offset_x, offset_y))
 
     current_time = pygame.time.get_ticks()
     if key_pressed and current_time - last_move_time > cooldown_duration:
@@ -878,12 +967,14 @@ while running:
 
             # Play the next sound
             if random.randint(1, 100) <= 40 and len(sound_sequence) >= n_back_level + 1:
-                chosen_sound_info = sound_sequence[-n_back_level - 1]
+                chosen_sound_info = sound_sequence[-n_back_level]
             else:
                 chosen_list = random.choice([object_sounds, animal_sounds])
                 chosen_sound_info = random.choice(chosen_list)
             sound_duration = play_sound(chosen_sound_info)
-            sound_end_time = pygame.time.get_ticks() + sound_duration + post_sound_delay
+
+            # Set the time when the next sound should be played
+            sound_end_time = current_time + sound_duration + sound_delay
 
             # Determine if this sound requires a response based on N-BACK rule
             if (len(sound_sequence) >= n_back_level + 1 and
@@ -896,42 +987,12 @@ while running:
             response_made = False  # Reset response flag for the new interval
 
     # Draw the player
-    pygame.draw.rect(screen, RED, (player_x * cell_size, player_y * cell_size, cell_size, cell_size))
+    pygame.draw.rect(screen, RED, ((player_x * cell_size + offset_x),
+                                   (player_y * cell_size + offset_y), cell_size, cell_size))
 
     # Check if the maze is completed
     if is_maze_completed(player_x, player_y, maze):
-        # Log event for the end of the level
-        log_event(9, datetime.now().timestamp())
-        if (datetime.now() - experiment_start_time).total_seconds() > 2700: # 45 minutes
-            experiment_ended = True
-        # set up the new level
-        maze, n_back_level, screen_width, screen_height, cell_size, maze_background = \
-            setup_level(n_back_level, screen_width, screen_height)
-
-        # Call the rating screen function after a maze is completed
-        nasa_tlx_ratings = nasa_tlx_rating_screen()
-        if experiment_ended:
-            # Save data before exiting after completing all levels
-            save_data_and_participant_info(experiment_data, user_details, stage_performance)
-            break  # End the game after the last level
-
-        # Reset the sound sequence for the new level
-        sound_sequence = []
-
-        # change the screen size back to instruction screen size
-        instruction_screen_set = pygame.display.set_mode((initial_screen_width, initial_screen_height))
-        # Call the instruction screen with the updated window size
-        if not instruction_screen(instruction_screen_set, n_back_level, animal_sound):
-            exit()  # Exit if the user closes the window or presses ESCAPE
-
-        # Log event for the start of a new level
-        log_event(4, datetime.now().timestamp())
-
-        # Adjust the screen dimensions to fit the new maze
-        screen = pygame.display.set_mode((screen_width, screen_height))
-
-        # Reset player position and other necessary variables for the new level
-        player_x, player_y = 0, 1  # Reset player position to the start of the maze
+        complete_maze()
 
     pygame.display.flip()
     pygame.time.Clock().tick(30)  # Limit to 30 frames per second

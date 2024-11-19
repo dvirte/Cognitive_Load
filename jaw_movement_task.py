@@ -1,8 +1,11 @@
 from psychopy import visual, core, sound, parallel, event
+import sounddevice as sd
+import numpy as np
 import random
 import os
 import csv
 from datetime import datetime
+from XtrRT_master.XtrRT_master.XtrRT.data import Data
 
 # ==========================
 # Setup
@@ -38,11 +41,30 @@ subject_number = f"{next_subject_number:02d}"
 subject_folder = os.path.join(experiment_folder, subject_number)
 os.makedirs(subject_folder, exist_ok=True)
 
+# Start data recording
+host_name = "127.0.0.1"
+port = 20001
+n_bytes = 1024
+data = Data(host_name, port, verbose=False, timeout_secs=15,
+            save_as=f"Jaw_Movement_Experiment/{subject_number}/{subject_number}.edf")
+data.start()
+
+data.add_annotation("Start recording")
+
 # Prepare data storage
-data = []
+data_triggers = []
 
 # Create a window
 win = visual.Window(fullscr=True, color='black')
+
+# Parameters for the beep sound
+frequency = 440  # Frequency of the beep in Hz (A4 note)
+duration = 0.5   # Duration of the beep in seconds
+sample_rate = 44100  # Sample rate (samples per second)
+
+# Generate a sine wave for the beep
+t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+beep = 0.5 * np.sin(2 * np.pi * frequency * t)
 
 # Initial instruction
 initial_instruction = visual.TextStim(
@@ -70,9 +92,6 @@ movement_triggers = {
 movement_list = movements * 15  # Total of 60 trials
 random.shuffle(movement_list)   # Randomize the order
 
-# Prepare the sound stimulus (beep sound)
-beep = sound.Sound('A', secs=0.5)  # You can replace 'A' with a filename if you have a specific sound
-
 # ==========================
 # Main Experiment Loop
 # ==========================
@@ -90,16 +109,17 @@ for movement in movement_list:
     # --------------------------
     # Action Period (5 seconds)
     # --------------------------
-    # Play the sound cue
-    beep.play()
+    # Play the beep sound
+    sd.play(beep, samplerate=sample_rate)
 
     # Send trigger if parallel port is set up
     trigger_time = experiment_clock.getTime()  # Time in seconds since experiment started
     trigger_value = movement_triggers[movement]
+    data.add_annotation(str(trigger_value))  # Add trigger to the data stream
     print(f"Trigger for '{movement}' (code {trigger_value}) would be sent here.")
 
     # Record the data
-    data.append({
+    data_triggers.append({
         'Movement': movement,
         'Trigger': trigger_value,
         'Time': trigger_time
@@ -122,7 +142,7 @@ with open(filepath, mode='w', newline='') as csv_file:
     writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
 
     writer.writeheader()
-    for entry in data:
+    for entry in data_triggers:
         writer.writerow(entry)
 
 print(f"Data saved to {filepath}")
@@ -144,6 +164,12 @@ event.waitKeys(keyList=['return'])
 # ==========================
 # Cleanup
 # ==========================
+
+data.add_annotation("Stop recording")
+data.stop()
+
+print(data.annotations)
+print('process terminated')
 
 # Close the window and exit
 win.close()

@@ -8,6 +8,7 @@ import glob
 import pyxdf as pyxdf
 import csv
 import matplotlib.pyplot as plt
+import re
 
 
 class DataObj:
@@ -24,6 +25,7 @@ class DataObj:
         self.weights = self.read_weights()
         self.trail_cog_nasa = self.calculate_cognitive_load()
         self.sorted_indices = np.argsort(self.trail_cog_nasa)[::-1]
+        self.subject_id = self.extract_subject_id()
 
     @staticmethod
     def create_output_folder(path):
@@ -124,6 +126,14 @@ class DataObj:
         for key in self.weights.keys():
             cognitive_loads += self.weights[key] * self.exp_data[key]
         return cognitive_loads
+
+    def extract_subject_id(self):
+        """
+        Extracts the subject ID from the filename.
+        Assumes filename contains 'sub-PXXX' where XXX is the subject number.
+        """
+        match = re.search(r'sub-P(\d+)', self.file_name)
+        return match.group(1).zfill(3)  # Ensures it's zero-padded to 3 digits
 
     def plot_nasa_tlx(self):
         """

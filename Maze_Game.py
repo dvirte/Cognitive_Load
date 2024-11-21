@@ -41,6 +41,13 @@ pygame.mixer.init()
 #    18: 'Indicates for calibration: end calibration'
 #    19: 'Indicates that the participant skipped the maze in the middle.'
 #    20: 'Indicates that a new maze is started because the previous maze was completed in less than 1.5 minutes.'
+#    21: 'Calibration step: start of white dot with eyes open',
+#    22: 'Calibration step: beep to close eyes',
+#    23: 'Calibration step: end of white dot calibration',
+#    24: 'Jaw Calibration: Clenching',
+#    25: 'Jaw Calibration: Jaw opening',
+#    26: 'Jaw Calibration: Chewing',
+#    27: 'Jaw Calibration: Resting',
 # }
 
 experiment_data = []  # Initialize an empty list to store event data
@@ -152,7 +159,242 @@ def welcome_screen(screen):
     return True
 
 
+def white_dot_calibration(screen):
+    # Display the instruction page
+    instruction_text = [
+        "A white dot will appear on the screen.",
+        "Please look at it without blinking.",
+        "When the beep sounds, please close your eyes",
+        "and keep looking at where the dot is until the next beep is heard.",
+        "Press Enter to continue."
+    ]
+
+    # Text settings
+    font_size = 60
+    font = pygame.font.Font(None, font_size)
+    color = (255, 255, 255)  # White color for text
+    line_spacing = 10  # Spacing between lines
+
+    # Clear the screen
+    screen.fill((0, 0, 0))
+    # Calculate the total height of the text block
+    total_height = (font_size + line_spacing) * len(instruction_text) - line_spacing
+    # Calculate the starting y position to vertically center the text
+    start_y = (screen_height - total_height) // 2
+
+    for i, text in enumerate(instruction_text):
+        text_surface = font.render(text, True, color)
+        rect = text_surface.get_rect(center=(screen_width // 2, start_y + i * (font_size + line_spacing)))
+        screen.blit(text_surface, rect)
+
+    pygame.display.flip()
+
+    # Wait for the participant to press Enter
+    waiting_for_input = True
+    while waiting_for_input:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    waiting_for_input = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
+    # Start the calibration
+    screen.fill((0, 0, 0))
+    # Draw the white dot at the center
+    dot_radius = 10  # Adjust the size as needed
+    pygame.draw.circle(screen, (255, 255, 255), (screen_width // 2, screen_height // 2), dot_radius)
+    pygame.display.flip()
+
+    # Log the start of the white dot calibration
+    log_event(21, datetime.now().timestamp())
+
+    # Wait for 30 seconds while handling events
+    start_time = pygame.time.get_ticks()
+    while pygame.time.get_ticks() - start_time < 30000:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+        pygame.time.delay(100)
+
+    # Play the beep sound to signal closing eyes
+    winsound.Beep(2500, 500)
+    # Log the beep event to close eyes
+    log_event(22, datetime.now().timestamp())
+
+    # Continue displaying the dot
+    pygame.draw.circle(screen, (255, 255, 255), (screen_width // 2, screen_height // 2), dot_radius)
+    pygame.display.flip()
+
+    # Wait for another 30 seconds while handling events
+    start_time = pygame.time.get_ticks()
+    while pygame.time.get_ticks() - start_time < 30000:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+        pygame.time.delay(100)
+
+    # Play the beep sound to signal the end
+    winsound.Beep(2500, 500)
+    # Log the end of the white dot calibration
+    log_event(23, datetime.now().timestamp())
+
+    # Clear the screen
+    screen.fill((0, 0, 0))
+    pygame.display.flip()
+
+
+def jaw_calibration(screen):
+    global screen_width, screen_height
+
+    # Define movements and corresponding trigger codes
+    movements = ['Clenching', 'Jaw opening', 'Chewing', 'Resting']
+    movement_triggers = {
+        'Clenching': 24,
+        'Jaw opening': 25,
+        'Chewing': 26,
+        'Resting': 27
+    }
+
+    # Create a list of movements, each repeated 3 times (adjust as needed)
+    movement_list = movements * 3  # Total of 12 trials
+    random.shuffle(movement_list)   # Randomize the order
+
+    # Text settings
+    font_size = 60
+    font = pygame.font.Font(None, font_size)
+    color = (255, 255, 255)
+    line_spacing = 10
+
+    # Display initial instructions
+    instruction_text = [
+        "A movement will be displayed on the screen.",
+        "When the sound is heard, please perform the movement.",
+        "When another sound is heard, the movement will be replaced.",
+        "Press Enter to start the calibration."
+    ]
+
+    # Clear the screen
+    screen.fill((0, 0, 0))
+    # Calculate the total height of the text block
+    total_height = (font_size + line_spacing) * len(instruction_text) - line_spacing
+    # Calculate the starting y position to vertically center the text
+    start_y = (screen_height - total_height) // 2
+
+    for i, text in enumerate(instruction_text):
+        text_surface = font.render(text, True, color)
+        rect = text_surface.get_rect(center=(screen_width // 2, start_y + i * (font_size + line_spacing)))
+        screen.blit(text_surface, rect)
+
+    pygame.display.flip()
+
+    # Wait for the participant to press Enter to start
+    waiting_for_input = True
+    while waiting_for_input:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    waiting_for_input = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                return
+        pygame.time.delay(100)
+
+    # Start the jaw calibration
+    for movement in movement_list:
+        # Display the movement
+        instruction_text = [
+            f"Please prepare to:",
+            f"{movement}"
+        ]
+
+        # Clear the screen
+        screen.fill((0, 0, 0))
+        # Calculate the total height of the text block
+        total_height = (font_size + line_spacing) * len(instruction_text) - line_spacing
+        # Calculate the starting y position to vertically center the text
+        start_y = (screen_height - total_height) // 2
+
+        for i, text in enumerate(instruction_text):
+            text_surface = font.render(text, True, color)
+            rect = text_surface.get_rect(center=(screen_width // 2, start_y + i * (font_size + line_spacing)))
+            screen.blit(text_surface, rect)
+
+        pygame.display.flip()
+
+        # Play the sound immediately when the movement appears
+        winsound.Beep(750, 500)  # Sound indicating new movement
+        # Optionally, you can use a different frequency or sound file
+
+        # Wait for 5 seconds while the participant prepares
+        start_time = pygame.time.get_ticks()
+        while pygame.time.get_ticks() - start_time < 5000:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+            pygame.time.delay(100)
+
+        # Play the beep sound to signal the participant to perform the movement
+        winsound.Beep(2500, 500)  # Sound indicating to perform the movement
+        # Log the trigger for the movement
+        trigger_id = movement_triggers[movement]
+        log_event(trigger_id, datetime.now().timestamp())
+
+        # Wait for 5 seconds for the participant to perform the movement
+        start_time = pygame.time.get_ticks()
+        while pygame.time.get_ticks() - start_time < 5000:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+            pygame.time.delay(100)
+
+
+    # End of jaw calibration
+    # Optionally, display a message indicating completion
+    end_text = [
+        "Jaw calibration is complete.",
+        "Press Enter to continue."
+    ]
+
+    # Clear the screen
+    screen.fill((0, 0, 0))
+    # Calculate the total height of the text block
+    total_height = (font_size + line_spacing) * len(end_text) - line_spacing
+    # Calculate the starting y position to vertically center the text
+    start_y = (screen_height - total_height) // 2
+
+    for i, text in enumerate(end_text):
+        text_surface = font.render(text, True, color)
+        rect = text_surface.get_rect(center=(screen_width // 2, start_y + i * (font_size + line_spacing)))
+        screen.blit(text_surface, rect)
+
+    pygame.display.flip()
+
+    # Wait for the participant to press Enter to proceed
+    waiting_for_input = True
+    while waiting_for_input:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_RETURN:
+                    waiting_for_input = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                return
+        pygame.time.delay(100)
+
+
 def calibration_screen(screen):
+    # Call the white dot calibration step
+    white_dot_calibration(screen)
+
+    # Call the jaw calibration step
+    jaw_calibration(screen)
+
     # Define a function to display a slide with instructions
     def display_calibration_instruction(instruction_text, start_trigger_id):
         if start_trigger_id == 17:
@@ -833,8 +1075,8 @@ while True:
 # Log event for the start of the experiment
 log_event(6, datetime.now().timestamp())
 
-# # Perform the calibration
-# calibration_screen(screen)
+# Perform the calibration
+calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze

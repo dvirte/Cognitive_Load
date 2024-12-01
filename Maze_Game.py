@@ -8,6 +8,13 @@ import pylsl
 import json
 import wave
 import winsound
+import copy
+
+# Check if the stimulation controller is available
+try:
+    from stimulation_modules.stimulation_controller.example_use_STG5controller import stim_controller
+except ImportError:
+    print("Stimulation controller not available")
 
 # Initialize LSL Stream
 outlet = pylsl.StreamOutlet(pylsl.StreamInfo("Trigger_Cog", "Markers", 1, 0, pylsl.cf_int32, "myuidw43536"))
@@ -28,11 +35,8 @@ pygame.mixer.init()
 #     5: 'Indicates the end of the experiment.'
 #     6: 'Indicates the start of the experiment.'
 #     7: 'Indicates the start of the N-BACK Instructions.'
-#     8: 'Indicates the end of the N-BACK Instructions.'
-#     9: 'Indicates the end of a level in the experiment.',
 #    10: 'Indicates when the subject has high error rates'
 #    11: 'Indicates start of the NASA-TLX rating'
-#    12: 'Indicates end of the NASA-TLX rating'
 #    13: 'Indicates for calibration: start blinking'
 #    14: 'Indicates for calibration: start jaw stiffness'
 #    15: 'Indicates for calibration: start frowning'
@@ -50,6 +54,7 @@ pygame.mixer.init()
 #    27: 'Jaw Calibration: Resting',
 # }
 
+stim_flag = False  # Flag to indicate if stimulation is enabled
 experiment_data = []  # Initialize an empty list to store event data
 maze_size = 5  # Initial maze size
 current_threshold = 0.3  # Initial error threshold
@@ -61,6 +66,7 @@ stage_performance = []  # Initialize list to store high error performance
 path_of_maze = [] # Initialize list to store the path of the maze
 baseline_maze = 0  # Play 10 levels of maze without any n-back task
 amount_of_levels = 10  # Amount of levels to play before starting the N-back task
+time_of_experiment = 1  # Time in minutes for the experiment
 
 # Initialize sound delay
 sound_delay = 500  # Initial delay between sounds in milliseconds (0.5 seconds)
@@ -76,6 +82,8 @@ def log_event(trigger_id, timestamp):
     # Send the trigger to the LSL stream
     outlet.push_sample([trigger_id])
     print(f"Trigger {trigger_id}")
+    if stim_flag:
+        stim_controller.start_stimulation(bursts_count=1)
 
 
 def display_text(screen, text, font_size=50, color=(255, 255, 255), y_offset=0):
@@ -95,7 +103,7 @@ def draw_text(surface, text, x, y, font_size=32, color=(255, 255, 255), center=F
         # Center the text horizontally around the x and place it at the y position
         text_rect.center = (x, y)
     else:
-        # Place text at the top left corner of the x, y
+        # Place text in the top left corner of the x, y
         text_rect.topleft = (x, y)
 
     surface.blit(text_surface, text_rect)
@@ -260,7 +268,7 @@ def jaw_calibration(screen):
     }
 
     # Create a list of movements, each repeated 3 times (adjust as needed)
-    movement_list = movements * 3  # Total of 12 trials
+    movement_list = movements * 15  # Total of 12 trials
     random.shuffle(movement_list)   # Randomize the order
 
     # Text settings
@@ -476,8 +484,13 @@ def instruction_screen(screen, n_back_level, animal_sound):
     if n_back_level > 0:
         instructions.append("If a sound is the same as one you heard ")
         instructions.append(f"{n_back_level} steps ago,")
+        # Add a beep to clarify this instruction
+        winsound.Beep(2500, 500)  # Frequency: 2500Hz, Duration: 500ms
+
         if animal_sound:
-            instructions.append("and it's an animal sound,")
+            instructions.append("and it's an animal sound,")  # Add instruction for animal sounds
+        else:
+            instructions.append("and it's not an animal sound,")  # Add instruction for non-animal sounds
         instructions.append("press SPACEBAR.")
     instructions.append(" ")
     instructions.append("Press SPACEBAR to start the level.")
@@ -502,14 +515,12 @@ def instruction_screen(screen, n_back_level, animal_sound):
     while waiting_for_input:
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                pygame.quit()
                 save_data_and_participant_info(experiment_data, user_details, stage_performance)
+                pygame.quit()
                 return False
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 waiting_for_input = False
 
-    # Log event for the end of the N-BACK Instructions
-    log_event(8, datetime.now().timestamp())
 
     return True
 
@@ -652,9 +663,6 @@ def nasa_tlx_rating_screen():
     for scale in categories:
         stage_performance[-1][scale] = scale_values[scale]
 
-    # Log event for the end of the NASA-TLX rating
-    log_event(12, datetime.now().timestamp())
-
 
 def calculate_nasa_weight():
     # Set the display to full screen
@@ -763,8 +771,9 @@ def setup_level(n_back_level, screen_width, screen_height, adjust_levels=True):
             error_rate, adjusted_threshold = analyze_performance()
             stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': error_rate,
                                       'n_back_level': n_back_level, 'maze_size': maze_size,
-                                      'animal_sound': animal_sound, "path_of_maze": path_of_maze[-1],
+                                      'animal_sound': animal_sound, "path_of_maze": copy.deepcopy(path_of_maze),
                                       'sound_delay': sound_delay})
+            path_of_maze = []
             print(f"Performance error: {error_rate}")
 
             # Logic to decide on increasing difficulty or ending the experiment
@@ -866,9 +875,9 @@ def analyze_performance():
     # Calculation of the amount of triggers of each type for the level that is now finished, and the previous level
     current_triggers = [0, 0, 0]
 
+    performance_ratios['end'].append(datetime.now().timestamp())
+
     for data in reversed(experiment_data):
-        if data['trigger_id'] == 9:
-            performance_ratios['end'].append(data['timestamp'])
         if data['trigger_id'] == 4:
             performance_ratios['start'].append(data['timestamp'])
             break
@@ -943,19 +952,26 @@ def complete_maze():
     global maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y
     global key_pressed, sound_sequence, player_x, player_y, running, screen, stage_start_time
 
-    # Log event for the end of the level
-    log_event(9, datetime.now().timestamp())
-
     # Reset the key state to avoid unintended movement
     key_pressed = None  # Reset key state
 
     # Calculate the elapsed time for the current maze
     elapsed_time = (datetime.now() - stage_start_time).total_seconds()
 
-    if (datetime.now() - experiment_start_time).total_seconds() > 2700:  # 45 minutes
+    if (datetime.now() - experiment_start_time).total_seconds() > time_of_experiment*60: # experiment ended
+        # Call the rating screen function after a maze is completed
+        error_rate, _ = analyze_performance()
+        stage_performance.append({
+            'timestamp': datetime.now().timestamp(),
+            'error_rate': error_rate,  # Ensure this is updated
+            'n_back_level': n_back_level,
+            'maze_size': maze_size,
+            'animal_sound': animal_sound,
+            "path_of_maze": copy.deepcopy(path_of_maze),
+            'sound_delay': sound_delay,
+        })
+        nasa_tlx_ratings = nasa_tlx_rating_screen()
         # experiment ended
-        # Save data before exiting after completing all levels
-        save_data_and_participant_info(experiment_data, user_details, stage_performance)
         running = False  # Set running to False to exit the game loop
         return  # End the function
 
@@ -990,13 +1006,37 @@ def complete_maze():
         stage_start_time = datetime.now()  # Add this line
 
     # Log event for the start of a new level
-    log_event(4, datetime.now().timestamp())
+    if experiment_data[-1]['trigger_id'] != 20: # If the last trigger was not for a new maze in the same level
+        log_event(4, datetime.now().timestamp())
 
     # Adjust the    screen dimensions to fit the new maze
     screen = pygame.display.set_mode((screen_width, screen_height))
 
     # Reset player position and other necessary variables for the new level
     player_x, player_y = 0, 1  # Reset player position to the start of the maze
+
+
+def end_experiment_screen(screen):
+    not_stop_game = True
+    while not_stop_game:
+        screen.fill((0, 0, 0))  # Clear the screen with black
+
+        # Display the thank-you messages
+        display_text(screen, "Thank you very much for your participation.", font_size=60, y_offset=-50)
+        display_text(screen, "Please do not click on anything.", font_size=60, y_offset=50)
+
+        pygame.display.flip()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                not_stop_game = False
+                pygame.quit()
+                return
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    not_stop_game = False
+
+        pygame.time.delay(100)  # Add a small delay to prevent high CPU usage
 
 
 def save_data_and_participant_info(experiment_data, user_details, stage_performance):
@@ -1022,16 +1062,16 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
         for key, value in user_details.items():
             file.write(f"{key}: {value}\n")
 
-        # Save error performance and NASA-TLX weights together
-        error_file_path = os.path.join(folder_name, 'stage_performance.csv')
-        with open(error_file_path, 'w', newline='') as file:
-            # Include weight keys in the fieldnames
-            fieldnames = list(stage_performance[0].keys())
-            writer = csv.DictWriter(file, fieldnames=fieldnames)
-            writer.writeheader()
-            # Assuming weights should be included in every line of stage_performance data
-            for data in stage_performance:
-                writer.writerow(data)
+    # Save error performance and NASA-TLX weights together
+    error_file_path = os.path.join(folder_name, 'stage_performance.csv')
+    with open(error_file_path, 'w', newline='') as file:
+        # Include weight keys in the fieldnames
+        fieldnames = list(stage_performance[0].keys())
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        # Assuming weights should be included in every line of stage_performance data
+        for data in stage_performance:
+            writer.writerow(data)
 
     # Save NASA-TLX weights
     weights_file_path = os.path.join(folder_name, 'nasa_tlx_weights.csv')
@@ -1039,6 +1079,9 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
         writer = csv.DictWriter(file, fieldnames=weights.keys())
         writer.writeheader()
         writer.writerow(weights)
+
+    # End an experiment definitively
+    end_experiment_screen(screen)
 
 
 # Load sounds from both folders
@@ -1075,8 +1118,8 @@ while True:
 # Log event for the start of the experiment
 log_event(6, datetime.now().timestamp())
 
-# Perform the calibration
-calibration_screen(screen)
+# # Perform the calibration
+# calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze

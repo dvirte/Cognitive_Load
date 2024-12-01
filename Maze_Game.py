@@ -1118,8 +1118,8 @@ while True:
 # Log event for the start of the experiment
 log_event(6, datetime.now().timestamp())
 
-# # Perform the calibration
-# calibration_screen(screen)
+# Perform the calibration
+calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze

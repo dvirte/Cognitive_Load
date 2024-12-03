@@ -13,8 +13,10 @@ import copy
 # Check if the stimulation controller is available
 try:
     from stimulation_modules.stimulation_controller.example_use_STG5controller import stim_controller
+    stim_flag = True
 except ImportError:
     print("Stimulation controller not available")
+    stim_flag = False
 
 # Initialize LSL Stream
 outlet = pylsl.StreamOutlet(pylsl.StreamInfo("Trigger_Cog", "Markers", 1, 0, pylsl.cf_int32, "myuidw43536"))
@@ -54,7 +56,7 @@ pygame.mixer.init()
 #    27: 'Jaw Calibration: Resting',
 # }
 
-stim_flag = False  # Flag to indicate if stimulation is enabled
+
 experiment_data = []  # Initialize an empty list to store event data
 maze_size = 5  # Initial maze size
 current_threshold = 0.3  # Initial error threshold
@@ -66,7 +68,7 @@ stage_performance = []  # Initialize list to store high error performance
 path_of_maze = [] # Initialize list to store the path of the maze
 baseline_maze = 0  # Play 10 levels of maze without any n-back task
 amount_of_levels = 10  # Amount of levels to play before starting the N-back task
-time_of_experiment = 1  # Time in minutes for the experiment
+time_of_experiment = 45  # Time in minutes for the experiment
 
 # Initialize sound delay
 sound_delay = 500  # Initial delay between sounds in milliseconds (0.5 seconds)
@@ -484,13 +486,12 @@ def instruction_screen(screen, n_back_level, animal_sound):
     if n_back_level > 0:
         instructions.append("If a sound is the same as one you heard ")
         instructions.append(f"{n_back_level} steps ago,")
-        # Add a beep to clarify this instruction
-        winsound.Beep(2500, 500)  # Frequency: 2500Hz, Duration: 500ms
 
         if animal_sound:
             instructions.append("and it's an animal sound,")  # Add instruction for animal sounds
         else:
-            instructions.append("and it's not an animal sound,")  # Add instruction for non-animal sounds
+            # Add a beep to clarify this instruction
+            winsound.Beep(2500, 500)  # Frequency: 2500Hz, Duration: 500ms
         instructions.append("press SPACEBAR.")
     instructions.append(" ")
     instructions.append("Press SPACEBAR to start the level.")

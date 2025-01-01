@@ -54,6 +54,9 @@ pygame.mixer.init()
 #    25: 'Jaw Calibration: Jaw opening',
 #    26: 'Jaw Calibration: Chewing',
 #    27: 'Jaw Calibration: Resting',
+#    28: 'Synchronization Calibration: Start',
+#    29: 'Synchronization Calibration: Single sound',
+#    30: 'Synchronization Calibration: End',
 # }
 
 
@@ -68,7 +71,8 @@ stage_performance = []  # Initialize list to store high error performance
 path_of_maze = [] # Initialize list to store the path of the maze
 baseline_maze = 0  # Play 10 levels of maze without any n-back task
 amount_of_levels = 10  # Amount of levels to play before starting the N-back task
-time_of_experiment = 45  # Time in minutes for the experiment
+time_of_experiment = 5  # Time in minutes for the experiment
+middle_calibration = True  # Flag to indicate if the calibration is in the middle of the experiment
 
 # Initialize sound delay
 sound_delay = 500  # Initial delay between sounds in milliseconds (0.5 seconds)
@@ -472,6 +476,67 @@ def calibration_screen(screen):
     log_event(18, datetime.now().timestamp())
 
 
+def synchronization_calibration(screen):
+    """
+    Perform synchronization calibration.
+    :param screen: Pygame screen for display.
+    :param trigger_start: Trigger ID for starting calibration.
+    :param trigger_end: Trigger ID for ending calibration.
+    """
+    # Display instructions
+    instructions = [
+        "Close your eyes and relax.",
+        "Each time you hear a sound, close your eyes tightly.",
+        "When you hear a double sound, open your eyes.",
+        "",
+        "Press Enter to continue."
+    ]
+
+    screen.fill((0, 0, 0))
+    for i, line in enumerate(instructions):
+        display_text(screen, line, font_size=65, y_offset=-150 + i * 50)
+
+    pygame.display.flip()
+
+    # Wait for user to press Enter
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+                waiting = False
+            elif event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
+    screen.fill((0, 0, 0))
+    display_text(screen, "Close your eyes", font_size=60, y_offset=0)
+    pygame.display.flip()
+
+    # Perform calibration sequence
+    sequence_durations = [7000, 5000, 5000, 5000]  # Durations in milliseconds
+
+    # Log the start of the synchronization calibration
+    log_event(28, datetime.now().timestamp())
+
+    for i, duration in enumerate(sequence_durations):
+        pygame.time.wait(duration)
+
+        if i < 3:  # Log single sound triggers
+            # Log single sound trigger
+            log_event(29, datetime.now().timestamp())
+            winsound.Beep(1000, 500)  # Single sound
+        elif i == 3:  # Log double sound trigger
+            # Log the end of the synchronization calibration
+            log_event(30, datetime.now().timestamp())
+            winsound.Beep(1000, 300)  # Double sound
+            pygame.time.wait(150)
+            winsound.Beep(1000, 300)
+
+    # Clear the screen after calibration
+    screen.fill((0, 0, 0))
+    pygame.display.flip()
+
+
 def instruction_screen(screen, n_back_level, animal_sound):
     # Log event for the start of the N-BACK Instructions
     log_event(7, datetime.now().timestamp())
@@ -773,16 +838,16 @@ def setup_level(n_back_level, screen_width, screen_height, adjust_levels=True):
         if baseline_maze > 1:
             # Analyze the latest performance from experiment_data
             # Placeholder for performance analysis logic
-            error_rate, adjusted_threshold = analyze_performance()
+            error_rate = analyze_performance()
             stage_performance.append({'timestamp': datetime.now().timestamp(), 'error_rate': error_rate,
                                       'n_back_level': n_back_level, 'maze_size': maze_size,
                                       'animal_sound': animal_sound, "path_of_maze": copy.deepcopy(path_of_maze),
                                       'sound_delay': sound_delay})
             path_of_maze = []
-            print(f"Performance error: {error_rate}")
+            print(f"Performance error: {1-error_rate}")
 
             # Logic to decide on increasing difficulty or ending the experiment
-            if error_rate <= adjusted_threshold and baseline_maze == amount_of_levels+2:
+            if 1-error_rate <= 0.2 and baseline_maze == amount_of_levels+2:
                 # Decide which aspect to increase: This is a simplified example; implement your own logic
                 if level_list[0] == 0:  # Increase the N-back level
                     animal_sound = True
@@ -797,12 +862,12 @@ def setup_level(n_back_level, screen_width, screen_height, adjust_levels=True):
                     animal_sound = False
                     level_list = [0, 0, 0]  # Reset the level list
 
-                if error_rate < 0.8 * adjusted_threshold:
+                if 1-error_rate <= 0.05:
                     # Decrease the delay between sounds by 0.5 seconds, down to the minimum
                     sound_delay = max(sound_delay - 500, min_sound_delay)
                     print("sound delay decreased")
 
-            elif error_rate > adjusted_threshold:
+            elif 1-error_rate >= 0.6 and baseline_maze == amount_of_levels+2:
                 # send trigger to indicate that the subject has high error rates
                 log_event(10, datetime.now().timestamp())
                 # Increase the delay between sounds by 0.5 seconds, up to the maximum
@@ -827,55 +892,11 @@ def setup_level(n_back_level, screen_width, screen_height, adjust_levels=True):
     return maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y
 
 
-def calculate_performance_ratio(current_stat, prev_stat):
-    if prev_stat > 0:
-        return current_stat / prev_stat
-    elif current_stat == 0:
-        return 0
-    else:
-        return current_stat
-
-
-def calculate_gradient(error_rates):
-    """
-    Calculate the performance gradient using a simple linear regression over
-    the error rates of the last few rounds.
-    """
-    # Assuming error_rates is a list of floats
-    # This is a placeholder for the actual calculation
-    slope = np.polyfit(range(len(error_rates)), error_rates, 1)[0]
-    return slope
-
-
-def adjust_threshold(current_threshold, gradient, maze_size, base_maze_size=5, adjustment_factor=0.05):
-    """
-    Adjust the error threshold dynamically based on the performance gradient,
-    current threshold, and maze size.
-    """
-    # Adjust the threshold based on maze size
-    maze_size_factor = maze_size / base_maze_size
-    maze_adjustment = (maze_size_factor - 1) * adjustment_factor
-
-    # Dynamic adjustment based on the performance gradient
-    if gradient < 0:  # Improvement shown
-        new_threshold = current_threshold - adjustment_factor
-    else:  # No improvement or worsening
-        new_threshold = current_threshold + adjustment_factor
-
-    # Ensure the new threshold doesn't become too lenient or too stringent
-    new_threshold = min(max(new_threshold + maze_adjustment, 0.1), 1.0)  # Assuming thresholds should be between 0.1 and 1.0
-
-    return new_threshold
-
-
 def analyze_performance():
     global performance_ratios, stage_performance, current_threshold
 
     # Initialize counts of levels completed
     levels_completed = sum(data['trigger_id'] == 4 for data in experiment_data)
-
-    if levels_completed == 1:  # For the first step, the error is 0
-        return 0, 1
 
     # Calculation of the amount of triggers of each type for the level that is now finished, and the previous level
     current_triggers = [0, 0, 0]
@@ -889,60 +910,19 @@ def analyze_performance():
         if data['trigger_id'] < 4:
             current_triggers[data['trigger_id'] - 1] += 1
 
-    performance_ratios['TP'].append(current_triggers[1] / (current_triggers[1] + current_triggers[2])
-                                    if current_triggers[1] + current_triggers[2] > 0 else 1)
+    performance_ratios['TP'].append(current_triggers[1])
+    performance_ratios['FP'].append(current_triggers[0]+current_triggers[2])
 
-    if current_triggers[0] + current_triggers[1] > 0:
-        performance_ratios['FP'].append(current_triggers[0] / (current_triggers[0] + current_triggers[1]))
-    elif current_triggers[2] > 0:
-        performance_ratios['FP'].append(1)
-    else:
-        performance_ratios['FP'].append(0)
+    # Total number of reports
+    total_reports = sum(current_triggers)
 
-    if levels_completed < 4:
-        return 0, 1
+    # Calculate the correctness percentage
+    try:
+        correct_percentage = current_triggers[1] / total_reports
+    except ZeroDivisionError:
+        return 1
 
-    # Calculate the rates of the duration, True Positives and False Positives
-    opp_tp_current_rate = calculate_performance_ratio(1 - performance_ratios['TP'][-1],
-                                                      1 - performance_ratios['TP'][-2])
-    opp_tp_prev_rate = calculate_performance_ratio(1 - performance_ratios['TP'][-2], 1 - performance_ratios['TP'][-3])
-    fp_current_rate = calculate_performance_ratio(performance_ratios['FP'][-1], performance_ratios['FP'][-2])
-    fp_prev_rate = calculate_performance_ratio(performance_ratios['FP'][-2], performance_ratios['FP'][-3])
-
-    duration_current = (performance_ratios['end'][-1] - performance_ratios['start'][-1])
-    duration_prev = (performance_ratios['end'][-2] - performance_ratios['start'][-2])
-    duration_prev_prev = (performance_ratios['end'][-3] - performance_ratios['start'][-3])
-
-    print(
-        f"duration_current: {duration_current}, duration_prev: {duration_prev}, duration_prev_prev: {duration_prev_prev}")
-
-    # Calculate the rates
-    duration_rate = (duration_current * duration_prev_prev) / duration_prev ** 2
-    tp_rate = calculate_performance_ratio(opp_tp_current_rate, opp_tp_prev_rate)
-    fp_rate = calculate_performance_ratio(fp_current_rate, fp_prev_rate)
-
-    print(f"duration_rate: {duration_rate}, tp_rate: {tp_rate}, fp_rate: {fp_rate}")
-
-    # Calculate the error rate
-    error_rate = duration_rate / 9 + tp_rate * 4 / 9 + fp_rate * 4 / 9
-
-    if len(stage_performance) < 10:
-        adjusted_threshold = 1
-    else:
-        # List of last 5 error rates
-        recent_error_rates = []
-        for i in range(5):
-            recent_error_rates.append(stage_performance[-5+i]['error_rate'])
-        # Calculate the performance gradient for the last 5 error rates
-        gradient = calculate_gradient(recent_error_rates)
-
-        # Adjust the base error threshold based on the gradient
-        # Assuming 'acceptable_error_threshold' is a predefined constant
-        adjusted_threshold = adjust_threshold(current_threshold, gradient, maze_size)
-        # Update the current threshold for the next level
-        current_threshold = adjusted_threshold
-
-    return error_rate, adjusted_threshold
+    return correct_percentage
 
 
 def is_maze_completed(player_x, player_y, maze):  # check if the player reached the exit
@@ -955,7 +935,7 @@ def is_maze_completed(player_x, player_y, maze):  # check if the player reached 
 
 def complete_maze():
     global maze, n_back_level, screen_width, screen_height, cell_size, maze_background, offset_x, offset_y
-    global key_pressed, sound_sequence, player_x, player_y, running, screen, stage_start_time
+    global key_pressed, sound_sequence, player_x, player_y, running, screen, stage_start_time, middle_calibration
 
     # Reset the key state to avoid unintended movement
     key_pressed = None  # Reset key state
@@ -965,7 +945,7 @@ def complete_maze():
 
     if (datetime.now() - experiment_start_time).total_seconds() > time_of_experiment*60: # experiment ended
         # Call the rating screen function after a maze is completed
-        error_rate, _ = analyze_performance()
+        error_rate = analyze_performance()
         stage_performance.append({
             'timestamp': datetime.now().timestamp(),
             'error_rate': error_rate,  # Ensure this is updated
@@ -975,8 +955,12 @@ def complete_maze():
             "path_of_maze": copy.deepcopy(path_of_maze),
             'sound_delay': sound_delay,
         })
-        nasa_tlx_ratings = nasa_tlx_rating_screen()
+        nasa_tlx_rating_screen()
+
+        # Call the synchronization calibration
+        synchronization_calibration(screen)
         # experiment ended
+
         running = False  # Set running to False to exit the game loop
         return  # End the function
 
@@ -994,7 +978,12 @@ def complete_maze():
             setup_level(n_back_level, screen_width, screen_height, adjust_levels=True)
 
         # Call the rating screen function after a maze is completed
-        nasa_tlx_ratings = nasa_tlx_rating_screen()
+        nasa_tlx_rating_screen()
+
+        # Add calibration synchronization after half of the experiment time has passed
+        if (datetime.now() - experiment_start_time).total_seconds() > (time_of_experiment * 60)/2 and middle_calibration:
+            synchronization_calibration(screen)
+            middle_calibration = False
 
         # Reset the sound sequence for the new level
         sound_sequence = []
@@ -1123,8 +1112,8 @@ while True:
 # Log event for the start of the experiment
 log_event(6, datetime.now().timestamp())
 
-# Perform the calibration
-calibration_screen(screen)
+# # Perform the calibration
+# calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze

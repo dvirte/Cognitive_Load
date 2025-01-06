@@ -1,12 +1,16 @@
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
 import numpy as np
+from debugpy.launcher import channel
 from scipy.signal import iirnotch
-from scipy.signal import filtfilt, welch
+from scipy.signal import filtfilt, welch, spectrogram
+from scipy.fft import fftshift
 from tqdm import tqdm
 from fooof import FOOOF
 from scipy.stats import spearmanr
 import pandas as pd
 import seaborn as sns
+
 
 
 def plot_trail(trail):
@@ -25,25 +29,30 @@ def plot_trail(trail):
     data, timestamps, triggers, trigger_times = trail[0], trail[1], trail[2], trail[3]
     trigger_times = trigger_times - timestamps[0]
     timestamps = timestamps - timestamps[0]  # Convert to seconds
-    status, period, kind = trail[4]
+    status, period = trail[4]
     samples, channels = data.shape
 
     # Define the title based on the status and period
     if status == 0:
-        title = f'{kind} - Rest Period: {period}'
+        title = f'Rest Period: {period}'
     elif status == 1:
-        title = f'{kind} - Task Period: {period}'
+        title = f'Task Period: {period}'
     elif status == 2:
-        title = f'{kind} - Calibration'
+        title = f'Calibration'
 
     # Determine the global min and max values across all channels
-    global_min = np.min(data)
-    global_max = np.max(data)
+    # global_min = np.mean(data)-2*np.std(data)
+    # global_max = np.mean(data)+2*np.std(data)
+
+
 
     fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
     fig.suptitle(title, fontsize=16)  # Add title to the plot
 
     for i in range(channels):
+        global_min = np.min(data[:, channels - 1 - i])
+        global_max = np.max(data[:, channels - 1 - i])
+
         axs[i].plot(timestamps, data[:, channels - 1 - i])  # Plot each channel
         axs[i].text(1.02, 0.5, f'EMG {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
         axs[i].spines['top'].set_visible(False)  # Hide the top spine
@@ -61,6 +70,102 @@ def plot_trail(trail):
     for j, trigger_time in enumerate(trigger_times):
         axs[-1].text(trigger_time, axs[-1].get_ylim()[0] - 0.05 * (axs[-1].get_ylim()[1] - axs[-1].get_ylim()[0]),
                      f'Trigger {int(triggers[j])}', color='red', ha='center', va='top', rotation=90)
+
+    # Adjust settings for the last subplot
+    axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
+    axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
+    axs[-1].set_xlabel("Time [s]")  # Common X-axis title
+    fig.text(0.04, 0.5, 'Amplitude [mV]', va='center', rotation='vertical')  # Common Y-axis title
+
+    plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
+    plt.show(block=False)
+
+
+def plot_signal_with_time(exp_processor, a=1, d=5, n=1):
+    """
+    Plots a specific time window of the signal for all electrodes with triggers marked,
+    based on the given parameters.
+
+    Parameters:
+    - exp_processor (ExpProcessor): The experiment processor object containing the data and triggers.
+    - a (int): 0 for start-based calculation, 1 for end-based calculation.
+    - d (int): Duration of the plot in minutes.
+    - n (int): Starting point in minutes from the beginning (if a=0) or end (if a=1) of the signal.
+
+    Returns:
+    - None: Displays the plot.
+    """
+    # Convert time to seconds
+    plot_duration = d * 60  # Duration of the plot in seconds
+    start_offset = n * 60  # Offset from the start or end of the signal in seconds
+
+    # Get signal and trigger timestamps
+    data_timestamps = exp_processor.data_timestamps
+    data = exp_processor.data
+    trigger_timestamps = exp_processor.triggers_time_stamps
+    triggers = exp_processor.triggers
+
+    # Determine the start and end times based on `a`
+    if a == 0:  # Start-based calculation
+        start_time = start_offset
+        end_time = start_time + plot_duration
+    elif a == 1:  # End-based calculation
+        start_time = data_timestamps[-1] - start_offset
+        end_time = start_time + plot_duration
+    else:
+        raise ValueError("Parameter 'a' must be either 0 (start-based) or 1 (end-based).")
+
+    # Handle edge cases: Ensure the window is within signal bounds
+    if end_time > data_timestamps[-1]:
+        end_time = data_timestamps[-1]
+        start_time = max(0, end_time - plot_duration)
+        title = f"Signal Plot of the Last {d} min"
+    else:
+        title = f"Signal Plot from {n} to {n + d} min since the {'start' if a == 0 else 'end'}"
+
+    # Extract the relevant portion of the signal
+    start_idx = np.searchsorted(data_timestamps, start_time)
+    end_idx = np.searchsorted(data_timestamps, end_time)
+    data_segment = data[start_idx:end_idx, :]
+    timestamps = data_timestamps[start_idx:end_idx] - start_time
+
+    # Extract the relevant triggers (including those beyond the signal timestamp range)
+    trigger_mask = trigger_timestamps >= start_time
+    triggers_segment = triggers[trigger_mask]
+    trigger_times = trigger_timestamps[trigger_mask] - start_time
+
+    # Create the plot
+    channels = data.shape[1]
+
+    fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
+    # Calculate the adjusted duration in case d exceeds n
+    actual_start_time = max(0, end_time - plot_duration if a == 1 else start_time)
+    actual_end_time = min(data_timestamps[-1], start_time + plot_duration if a == 0 else end_time)
+    actual_duration = (actual_end_time - actual_start_time) / 60  # Convert to minutes
+
+    fig.suptitle(title, fontsize=16)
+
+    for i in range(channels):
+        global_min = np.min(data_segment[:, channels - 1 - i])
+        global_max = np.max(data_segment[:, channels - 1 - i])
+
+        axs[i].plot(timestamps, data_segment[:, channels - 1 - i])  # Plot each channel
+        axs[i].text(1.02, 0.5, f'EMG {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
+        axs[i].spines['top'].set_visible(False)  # Hide the top spine
+        axs[i].spines['right'].set_visible(False)  # Hide the right spine
+        axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
+        axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
+        axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
+        axs[i].set_ylim(global_min, global_max)  # Set the same Y-axis limits for all subplots
+
+        # Add vertical red lines for triggers
+        for trigger_time in trigger_times:
+            axs[i].axvline(x=trigger_time, color='red', linestyle='--')
+
+    # Add trigger labels on the last subplot
+    for j, trigger_time in enumerate(trigger_times):
+        axs[-1].text(trigger_time, axs[-1].get_ylim()[0] - 0.05 * (axs[-1].get_ylim()[1] - axs[-1].get_ylim()[0]),
+                     f'Trigger {int(triggers_segment[j])}', color='red', ha='center', va='top', rotation=90)
 
     # Adjust settings for the last subplot
     axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
@@ -316,29 +421,6 @@ def segment_data(data, window_size, overlap):
     return np.array(segments)
 
 
-# def apply_fooof(data, fs):
-#
-#     # create frequency vector
-#
-#
-#     f = np.fft.fftfreq(data.shape[0], 1 / fs)
-#     f_keep = f > 0
-#     f = f[f_keep]
-#     n_channels = data.shape[-1]
-#     fft_values = np.zeros((n_channels, len(f)))
-#
-#     for i in range(n_channels):
-#         y = np.abs(np.fft.fft(data[:, i], axis=axis))[f_keep]
-#         fft_values[i] = y
-#
-#     fm = FOOOF(verbose=False)
-#     for ch in range(segmented_data.shape[1]):
-#         f, Pxx = welch(segmented_data[:, ch], fs, nperseg=fs/2)
-#         fm.add_data(f, Pxx)
-#         # Combine peak representations
-#         fm.plot(plot_peaks='shade', peak_kwargs={'color': 'green'})
-
-
 def plot_ratio(exp, window_size=30, overlap=0.5):
     fs = exp.fs  # Sampling frequency
     data = exp.data  # EEG data
@@ -550,3 +632,126 @@ def plot_selected_graphs_as_subplots(list_stat_trails, trail_cog_nasa):
     plt.savefig('Corr', dpi=300, bbox_inches='tight')
 
     plt.show()
+
+
+def create_plot(data, timestamps, trigger_times, triggers, title):
+    # Create the plot
+    channels = data.shape[1]
+
+    fig, axs = plt.subplots(channels, 1, figsize=(10, 20), sharex=True)  # 16 rows, 1 col, shared X-axis
+    fig.suptitle(title, fontsize=16)
+
+    for i in range(channels):
+        global_min = np.min(data[:, channels - 1 - i])
+        global_max = np.max(data[:, channels - 1 - i])
+
+        axs[i].plot(timestamps, data[:, channels - 1 - i])  # Plot each channel
+        axs[i].text(1.02, 0.5, f'EMG {channels - i}', transform=axs[i].transAxes, va='center', ha='left')
+        axs[i].spines['top'].set_visible(False)  # Hide the top spine
+        axs[i].spines['right'].set_visible(False)  # Hide the right spine
+        axs[i].spines['left'].set_visible(False)  # Optionally, hide the left spine as well
+        axs[i].spines['bottom'].set_visible(False)  # Hide the bottom spine
+        axs[i].get_xaxis().set_visible(False)  # Hide x-axis labels and ticks
+        axs[i].set_ylim(global_min, global_max)  # Set the same Y-axis limits for all subplots
+
+        # Add vertical red lines for triggers
+        for trigger_time in trigger_times:
+            axs[i].axvline(x=trigger_time, color='red', linestyle='--')
+
+    # Add trigger labels on the last subplot
+    for j, trigger_time in enumerate(trigger_times):
+        axs[-1].text(trigger_time, axs[-1].get_ylim()[0] - 0.05 * (axs[-1].get_ylim()[1] - axs[-1].get_ylim()[0]),
+                     f'Trigger {int(triggers[j])}', color='red', ha='center', va='top', rotation=90)
+
+    # Adjust settings for the last subplot
+    axs[-1].spines['bottom'].set_visible(True)  # Show the bottom spine for the last subplot
+    axs[-1].get_xaxis().set_visible(True)  # Show x-axis labels and ticks for the last subplot
+    axs[-1].set_xlabel("Time [s]")  # Common X-axis title
+    fig.text(0.04, 0.5, 'Amplitude [mV]', va='center', rotation='vertical')  # Common Y-axis title
+
+    plt.subplots_adjust(hspace=0)  # Remove horizontal space between plots
+    plt.show(block=False)
+
+
+def plot_spectrogram(data, fs, title):
+    """
+    Plot the spectrogram of the signal data.
+
+    Args:
+        data (ndarray): Signal data of shape (n_samples, n_channels).
+        fs (float): Sampling frequency in Hz.
+        title (str): Title for the spectrogram.
+    """
+    n_channels = data.shape[1]
+
+    for i in range(n_channels):
+        # Compute the spectrogram for each channel
+        f_spec, t_spec, Sxx = spectrogram(data[:, i], fs)
+
+        # Create a figure for the spectrogram
+        plt.figure(figsize=(10, 6))
+        plt.pcolormesh(t_spec, f_spec, 10 * np.log10(Sxx), shading='gouraud', cmap='inferno')
+        plt.colorbar(label='Power Spectral Density [dB]')
+        plt.xlabel('Time [s]')
+        plt.ylabel('Frequency [Hz]')
+        plt.title(f'{title} - Spectrogram (Channel {i + 1})')
+        plt.tight_layout()
+        plt.show()
+
+
+def plot_psd_windows(data, fs, triggers, trigger_time_stamps, window_duration, title, target_trigger=22):
+    """
+    Plot 6 PSD windows starting from the time corresponding to the target trigger.
+
+    Args:
+        data (ndarray): Signal data of shape (n_samples, n_channels).
+        fs (float): Sampling frequency in Hz.
+        triggers (array): Array of trigger values.
+        trigger_time_stamps (array): Array of time stamps for the triggers.
+        target_trigger (int): The trigger value to start the PSD windows.
+        window_duration (float): Duration of each PSD window in seconds.
+        title (str): Title for the PSD windows.
+    """
+    n_channels = data.shape[1]
+    window_samples = int(window_duration * fs)  # Samples per window
+
+    # Find the index of the target trigger
+    try:
+        trigger_idx = np.where(triggers == target_trigger)[0][0]
+        start_time = trigger_time_stamps[trigger_idx]
+    except IndexError:
+        raise ValueError(f"Target trigger {target_trigger} not found in the trigger vector.")
+
+    for i in range(n_channels):
+        # Calculate the start sample from the trigger time
+        start_sample = int(start_time * fs)
+
+        # Create a figure for the 6 PSD windows
+        fig, axes = plt.subplots(2, 3, figsize=(16, 8))
+        axes = axes.flatten()
+
+        for j in range(6):
+            # Calculate the window start and end indices
+            start_idx = start_sample + j * window_samples
+            end_idx = start_idx + window_samples
+
+            # Handle cases where the window exceeds the signal length
+            if end_idx > data.shape[0]:
+                start_idx = data.shape[0] - window_samples
+                end_idx = data.shape[0]
+
+            # Compute the PSD for the window
+            f_psd, Pxx = welch(data[start_idx:end_idx, i], fs)
+
+            # Plot the PSD
+            ax = axes[j]
+            ax.semilogy(f_psd, Pxx)
+            ax.set_xlabel('Frequency [Hz]')
+            ax.set_ylabel('PSD')
+            ax.set_title(f'Window {j + 1}')
+            ax.grid()
+
+        # Adjust layout and show the plots
+        fig.suptitle(f'{title} - PSD Windows (Channel {i + 1})')
+        plt.tight_layout()
+        plt.show()

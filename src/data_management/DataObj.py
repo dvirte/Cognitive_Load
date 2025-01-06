@@ -14,7 +14,6 @@ import re
 class DataObj:
     def __init__(self, path, reduce_faulty_electrodes=None):
         self.path = path
-        self.output_folder = self.create_output_folder(path)
         streams, fileheader = pyxdf.load_xdf(path)
         self.file_name = os.path.basename(path)
         self.start_time = fileheader['info']['datetime']
@@ -132,7 +131,7 @@ class DataObj:
         Extracts the subject ID from the filename.
         Assumes filename contains 'sub-PXXX' where XXX is the subject number.
         """
-        match = re.search(r'sub-P(\d+)', self.file_name)
+        match = re.search(r'participant_(\d+)', self.path)
         return match.group(1).zfill(3)  # Ensures it's zero-padded to 3 digits
 
     def plot_nasa_tlx(self):

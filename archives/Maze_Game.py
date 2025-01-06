@@ -60,19 +60,11 @@ pygame.mixer.init()
 # }
 
 
-experiment_data = []  # Initialize an empty list to store event data
 maze_size = 5  # Initial maze size
 current_threshold = 0.3  # Initial error threshold
 maze_complexity = 0.8  # Initial maze complexity
-animal_sound = True  # The n-back task only takes into account if the sound played is from animals and not inanimate
-level_list = [0, 0, 0]  # List to keep track of which aspect to increase next
-performance_ratios = {'TP': [], 'FP': [], 'start': [], 'end': []}  # Initialize performance ratios
-stage_performance = []  # Initialize list to store high error performance
-path_of_maze = [] # Initialize list to store the path of the maze
-baseline_maze = 0  # Play 10 levels of maze without any n-back task
 amount_of_levels = 10  # Amount of levels to play before starting the N-back task
-time_of_experiment = 5  # Time in minutes for the experiment
-middle_calibration = True  # Flag to indicate if the calibration is in the middle of the experiment
+time_of_experiment = 45  # Time in minutes for the experiment
 
 # Initialize sound delay
 sound_delay = 500  # Initial delay between sounds in milliseconds (0.5 seconds)
@@ -226,7 +218,7 @@ def white_dot_calibration(screen):
 
     # Wait for 12 seconds while handling events
     start_time = pygame.time.get_ticks()
-    while pygame.time.get_ticks() - start_time < 12000:
+    while pygame.time.get_ticks() - start_time < 7000:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -808,7 +800,7 @@ def load_maze_from_file(dim):
     """
     Load a random maze from the pre-generated files based on dimension.
     """
-    dir_path = f'ready_maze/dim{dim}'
+    dir_path = os.path.join(os.path.dirname(__file__), f"../../resources/ready_maze/dim{dim}")
     maze_files = [f for f in os.listdir(dir_path) if f.endswith('.json')]
     random_maze_file = random.choice(maze_files)
     maze_path = os.path.join(dir_path, random_maze_file)
@@ -1037,6 +1029,8 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
     weights = calculate_nasa_weight()
     serial_number = user_details['Serial Number']
     folder_name = f"S{serial_number.zfill(3)}"
+    project_root = os.path.join(os.path.dirname(__file__), "../../")
+    folder_name = os.path.join(project_root, folder_name)
     os.makedirs(folder_name, exist_ok=True)
 
     # Log event for the end of the game
@@ -1079,9 +1073,23 @@ def save_data_and_participant_info(experiment_data, user_details, stage_performa
 
 
 # Load sounds from both folders
-object_sounds = load_sounds(os.path.join("back_sound", "sound_object"), "object")
-animal_sounds = load_sounds(os.path.join("back_sound", "sound_animal"), "animal")
+object_sounds = load_sounds(
+    os.path.join(os.path.dirname(__file__), "../../resources/back_sound/sound_object"),
+    "object"
+)
+animal_sounds = load_sounds(
+    os.path.join(os.path.dirname(__file__), "../../resources/back_sound/sound_animal"),
+    "animal"
+)
 
+experiment_data = []  # Initialize an empty list to store event data
+level_list = [0, 0, 0]  # List to keep track of which aspect to increase next
+performance_ratios = {'TP': [], 'FP': [], 'start': [], 'end': []}  # Initialize performance ratios
+stage_performance = []  # Initialize list to store high error performance
+path_of_maze = [] # Initialize list to store the path of the maze
+baseline_maze = 0  # Play 10 levels of maze without any n-back task
+animal_sound = True  # The n-back task only takes into account if the sound played is from animals and not inanimate
+middle_calibration = True  # Flag to indicate if the calibration is in the middle of the experiment
 sound_sequence = []  # Reset for the new level
 
 # Timers and intervals
@@ -1112,8 +1120,8 @@ while True:
 # Log event for the start of the experiment
 log_event(6, datetime.now().timestamp())
 
-# # Perform the calibration
-# calibration_screen(screen)
+# Perform the calibration
+calibration_screen(screen)
 
 # Maze parameters
 dim = 30  # Size of the maze

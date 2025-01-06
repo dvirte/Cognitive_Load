@@ -1,3 +1,10 @@
-raw_data/
+# Python cache
 __pycache__/
-try_me.py
+*.pyc
+
+# IDE settings (PyCharm / IntelliJ)
+.idea/
+
+# Large data
+data/
+src/signal_processing/classifying_ica_components

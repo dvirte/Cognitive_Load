@@ -2,7 +2,7 @@ import os
 import pyintan as pyintan
 import numpy as np
 import scipy
-from load_intan_rhd_format import read_data
+from intanutil.load_intan_rhd_format import read_data
 import pandas as pd
 import glob
 import pyxdf as pyxdf

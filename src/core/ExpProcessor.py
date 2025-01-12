@@ -10,9 +10,10 @@ from scipy.signal import iirnotch, filtfilt
 import warnings
 from scipy.signal import welch
 import math
-from classifying_ica_components.classifying_ica_components import (perform_ica_algorithm,
+from src.signal_processing.classifying_ica_components.classifying_ica_components import (perform_ica_algorithm,
                                                                    classify_participant_components_using_atlas,
                                                                    extract_and_order_ica_data)
+
 
 
 

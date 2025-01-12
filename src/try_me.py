@@ -1,22 +1,25 @@
-from DataObj import DataObj
-import vis_cog as vc
-from ExpProcessor import ExpProcessor
-from emd_blinking import plot_emd_signal, segment_data
-from jaw_stiffness import extract_features
+from src.data_management.DataObj import DataObj
+from src.visualization import vis_cog as vc
+from src.core.ExpProcessor import ExpProcessor
+# from emd_blinking import plot_emd_signal, segment_data
+# from jaw_stiffness import extract_features
 import pandas as pd
 import pickle
 import os
-import proccess_func as pf
+from src.signal_processing import proccess_func as pf
 
 
 
 # Current path
 current_path = os.getcwd()
 
-id_num = '06'
+id_num = '08'
 
 # Merge the paths
+if 'src' in current_path:
+    current_path = os.path.join(current_path, '..')
 xdf_name = os.path.join(current_path, 'data', f'participant_{id_num}', 'S01', '01.xdf')
+
 
 # find the subject ID
 subject_id = xdf_name.split('\\')[-2]
@@ -52,33 +55,19 @@ else:
         processor = pickle.load(f)
     f.close()
 
+
 # # Process the data for calibration
 # pf.barin_process(processor, 2, 2)
 
-# Extract rate of challenging tasks
-sorted_indices = data.sorted_indices
+# # Extract rate of challenging tasks
+# sorted_indices = data.sorted_indices
 
-# Extract the most challenging task
+# # Extract the most challenging task
 # pf.barin_process(processor, 1, sorted_indices[0])
 
 # pf.plot_alpha_calibration(processor)
 
-# Check if the feature table is already created
-if 'feature_table.csv' not in os.listdir(session_folder):
-    feature = pf.create_feature_table(processor, data)
-    # Save the feature table
-    feature.to_csv(os.path.join(session_folder, "feature_table.csv"), index=False)
-else:
-    # Load the feature table from csv
-    feature_table_path = os.path.join(session_folder, "feature_table.csv")
-    feature = pd.read_csv(feature_table_path)
-
-top_feature_names, top_correlations = pf.get_top_correlated_features(feature, plot_corr=False, save_path=session_folder)
-
-final_model, selected_features, performance_dict = pf.build_and_evaluate_model(feature, top_feature_names)
-
 vc.plot_signal_with_time(processor)
-
 
 
 plot_list = [[2,1],[1,33],[1,34],[1,35],[0,35],[0,36],[0,37]]

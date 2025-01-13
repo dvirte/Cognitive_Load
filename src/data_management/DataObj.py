@@ -1,5 +1,5 @@
 import os
-import pyintan as pyintan
+# import pyintan as pyintan
 import numpy as np
 import scipy
 from intanutil.load_intan_rhd_format import read_data

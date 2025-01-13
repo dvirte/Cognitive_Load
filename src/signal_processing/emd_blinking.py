@@ -10,9 +10,9 @@ def plot_emd_signal(data_obj, maze_index):
 
     # get data from the first 3 blinks - 0.5 seconds before and 0.5 seconds after
     # Isolate the EMG signal for the given maze
-    blink_times = data_obj.calibrate_periods[1:4]
-    blink_start = blink_times[0][0]
-    blink_end = blink_times[-1][-1]
+    blink_times = data_obj.calibrate_periods[0]
+    blink_start = blink_times[0]
+    blink_end = blink_times[-1]
     blink_segment, time_segment = segment_data(data_obj, blink_start, blink_end)
 
     # Plot the EMG signal for the specified maze

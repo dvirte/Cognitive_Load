@@ -1,6 +1,7 @@
 from src.data_management.DataObj import DataObj
 from src.visualization import vis_cog as vc
 from src.core.ExpProcessor import ExpProcessor
+from src.signal_processing.emd_blinking import plot_emd_signal
 # from emd_blinking import plot_emd_signal, segment_data
 # from jaw_stiffness import extract_features
 import pandas as pd
@@ -13,7 +14,7 @@ from src.signal_processing import proccess_func as pf
 # Current path
 current_path = os.getcwd()
 
-id_num = '08'
+id_num = '07'
 
 # Merge the paths
 if 'src' in current_path:
@@ -46,21 +47,27 @@ if f'processor_{id_num}.pkl' not in os.listdir(session_folder):
         )
 
     # Save the object to a file with pickle and subject
-    with open(f'{session_folder}\processor_{id_num}.pkl', 'wb') as f:
+    with open(rf'{session_folder}\processor_{id_num}.pkl', 'wb') as f:
         pickle.dump(processor, f)
 
 else:
     # Load the object from the file
-    with open(f'{session_folder}\processor_{id_num}.pkl', 'rb') as f:
+    with open(rf'{session_folder}\processor_{id_num}.pkl', 'rb') as f:
         processor = pickle.load(f)
     f.close()
 
 
-# # Process the data for calibration
-# pf.barin_process(processor, 2, 2)
+# Initialize the processor instance
+maze_rank = 26
 
-# # Extract rate of challenging tasks
-# sorted_indices = data.sorted_indices
+# Plot the EMG signal for the specified maze
+plot_emd_signal(processor, maze_rank)
+
+# Process the data for calibration
+pf.barin_process(processor, 2, 2)
+
+# Extract rate of challenging tasks
+sorted_indices = data.sorted_indices
 
 # # Extract the most challenging task
 # pf.barin_process(processor, 1, sorted_indices[0])
@@ -77,15 +84,10 @@ for i, j in plot_list:
     vc.plot_trail(trial)
 
 
-# Initialize the processor instance
-maze_rank = 38
-
 # Plot the FOOOF results for the specified maze
 processor.plot_fooof(top_n_windows=6, indx=39, least_tow=True) # lightest task with the least 2 windows
 processor.plot_fooof(top_n_windows=6, indx=0, least_tow=False) # 0 for the most challenging maze
 
-# Plot the EMG signal for the specified maze
-plot_emd_signal(processor, maze_rank)
 
 # Extract jaw features for the specified maze
 extract_features(processor, maze_rank)

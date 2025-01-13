@@ -4,7 +4,7 @@ from src.data_management.DataObj import DataObj
 from src.core.ExpProcessor import ExpProcessor
 import src.models.model_functions as mf
 
-list_id = ['06','08']
+list_id = ['06','07','08']
 model_values = {}
 
 current_path = os.getcwd()
@@ -34,12 +34,12 @@ for id_num in list_id:
         )
 
         # Save the object to a file with pickle and subject
-        with open(f'{session_folder}\processor_{id_num}.pkl', 'wb') as f:
+        with open(rf'{session_folder}\processor_{id_num}.pkl', 'wb') as f:
             pickle.dump(processor, f)
 
     else:
         # Load the object from the file
-        with open(f'{session_folder}\processor_{id_num}.pkl', 'rb') as f:
+        with open(rf'{session_folder}\processor_{id_num}.pkl', 'rb') as f:
             processor = pickle.load(f)
         f.close()
 
@@ -53,6 +53,4 @@ common = set.intersection(*all_sets)
 print(f'Common features: {common}')
 
 
-all_sets = [set(model_values[pid]['top_features']) for pid in list_id]
-
-g=0
+all_sets = [set(model_values[pid]['top_20_features']) for pid in list_id]

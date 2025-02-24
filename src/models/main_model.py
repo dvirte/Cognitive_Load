@@ -3,8 +3,14 @@ import pickle
 from src.data_management.DataObj import DataObj
 from src.core.ExpProcessor import ExpProcessor
 import src.models.model_functions as mf
+from src.models.generate_article_plots import create_heatmap_top_features, create_heatmap_top_features_annotated
 
-list_id = ['06','07','08']
+# make a list from '01' to '13'
+list_id = [f'{i:02d}' for i in range(6, 16)]
+# exclude 10
+list_id.remove('10')
+
+
 model_values = {}
 
 current_path = os.getcwd()
@@ -48,9 +54,14 @@ for id_num in list_id:
                             'top_20_features': top_feature_names, 'top_correlations': top_correlations}
 
 
-all_sets = [set(model_values[pid]['selected_features']) for pid in list_id]
+all_sets = [set(model_values[pid]['top_20_features']) for pid in list_id]
 common = set.intersection(*all_sets)
 print(f'Common features: {common}')
 
 
 all_sets = [set(model_values[pid]['top_20_features']) for pid in list_id]
+
+data_dir = os.path.join(current_path, 'data')
+create_heatmap_top_features_annotated(list_id, data_dir)
+create_heatmap_top_features(list_id, data_dir)
+

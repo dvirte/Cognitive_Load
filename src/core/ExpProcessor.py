@@ -140,10 +140,19 @@ class ExpProcessor:
         cal_start_time = None
         play_start_time = None
         i = 0
+        first_seven = True
+        seven_allows = False
 
         while i < len(triggers):
             trigger = triggers[i]
             trigger_time = trigger_times[i]
+
+            if trigger_time>last_time:
+                print('Trigger time is greater than the last time')
+
+            if trigger == 7 and first_seven:
+                seven_allows = True
+                first_seven = False
 
             # Calibration periods
             if (13 <= trigger <= 18) or (21 <= trigger <= 27):
@@ -164,7 +173,10 @@ class ExpProcessor:
                 continue
 
             # Play periods
-            elif trigger == 4:
+            elif trigger == 4 or seven_allows:
+                if trigger == 7:
+                    seven_allows = False
+
                 # Check if the previous trigger was 20
                 if i > 0 and triggers[i - 1] == 20:
                     # This is a new maze within the same stage, so continue without marking a new play period

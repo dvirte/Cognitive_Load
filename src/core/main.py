@@ -7,6 +7,7 @@ from datetime import datetime
 from ExperimentState import ExperimentState
 from screens.welcome import input_screen, welcome_screen
 from calibration.calibration_flow import calibration_screen
+from practice_n_back import practice_n_back
 from screens.instructions import instruction_screen
 from maze_game_n import setup_level, is_maze_completed, complete_maze
 from nback_task import load_sounds, play_sound
@@ -64,6 +65,9 @@ def main():
         os.path.join(os.path.dirname(__file__), "../../resources/back_sound/sound_animal"),
         "animal")
 
+    # 6. Practice N-Back
+    practice_n_back(state, cfg, object_sounds, animal_sounds)
+
     # set up first level
     state.maze, state.cell_size, state.maze_background, state.offset_x, state.offset_y = (
         setup_level(state, cfg))
@@ -91,7 +95,7 @@ def main():
     state.experiment_start_time = datetime.now() # Start time of the experiment
     state.stage_start_time = datetime.now() # Record the start time of the first stage
 
-    # 6. Run the main game loop (or keep it inline)
+    # 7. Run the main game loop (or keep it inline)
 
     # Main game loop
     while state.running:
@@ -197,7 +201,7 @@ def main():
         pygame.display.flip()
         pygame.time.Clock().tick(30)  # Limit to 30 frames per second
 
-    # 7. Save data
+    # 8. Save data
     save_data_and_participant_info(state, cfg.stim_flag, user_details)
     pygame.quit()
 

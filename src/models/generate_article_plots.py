@@ -305,20 +305,35 @@ def create_heatmap_top_features_annotated(
     # ---------------------------------------------------------
     # 4) Rename columns (replacing underscores) & Plot
     # ---------------------------------------------------------
-        # 4A) Rename columns by replacing underscores with spaces
-        old_cols = heatmap_df.columns.tolist()
-        new_cols = [c.replace('_', ' ') for c in old_cols]
-        heatmap_df.columns = new_cols
-        annot_df.columns = new_cols
+    # 4A) Rename columns by replacing underscores with spaces
+    old_cols = heatmap_df.columns.tolist()
+    new_cols = [c.replace('_', ' ') for c in old_cols]
+    heatmap_df.columns = new_cols
+    annot_df.columns = new_cols
 
     # Ensure index (feature names) and columns are correctly formatted as strings
     heatmap_df.index = heatmap_df.index.astype(str)
     heatmap_df.columns = heatmap_df.columns.astype(str)
 
-    sorted_features = heatmap_df.loc["06"].sort_values(ascending=False).index
+    # **Sort features by their average correlation across all subjects**
+    sorted_features = heatmap_df.mean(axis=0).sort_values(ascending=False).index
+
+    # Reorder the heatmap and annotation dataframes based on sorted features
     heatmap_df_s = heatmap_df[sorted_features]
     annot_df_s = annot_df[sorted_features]
 
+    # 1) Identify the top feature
+    top_feature = sorted_features[0]
+
+    # 2) Sort subjects (the DataFrame rows) by the value of that top feature, descending
+    #    This will reorder the rows of heatmap_df_s so that the subject with the
+    #    highest value in the top feature is first.
+    heatmap_df_s = heatmap_df_s.sort_values(by=top_feature, ascending=False)
+
+    # Keep annotation data aligned
+    annot_df_s = annot_df_s.loc[heatmap_df_s.index]
+
+    # 3) Now create the heatmap using the transposed data
     plt.figure(figsize=(10, 6))
     sns.heatmap(
         heatmap_df_s.T,
@@ -328,19 +343,6 @@ def create_heatmap_top_features_annotated(
         center=0,
         cbar_kws={"shrink": 0.8, "label": "Correlation"}
     )
-
-
-
-    # # 4B) Create the heatmap with a labeled colorbar
-    # plt.figure(figsize=(10, 6))
-    # sns.heatmap(
-    #     heatmap_df.T,
-    #     annot=annot_df.T,  # pass our custom annotation matrix
-    #     fmt="",  # the annotation is already a string
-    #     cmap="RdBu_r",
-    #     center=0,
-    #     cbar_kws={"shrink": 0.8, "label": "Correlation"}
-    # )
 
     plt.text(-1.5, -1, "Features", fontsize=12, ha="center", va="bottom")
     plt.xlabel("Subjects subjective report")
@@ -365,39 +367,28 @@ def create_heatmap_top_features_annotated(
         value_name="Correlation"  # name for the new correlation value column
     )
 
-    # B) Create a figure for the box plot where the value is x and the feature is y
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(
-        data=melted_df,
-        x="Feature",
-        y="Correlation",
-        color="lightblue"
-    )
+    # Sort features by mean correlation
+    feature_order = melted_df.groupby("Feature")["Correlation"].mean().sort_values(ascending=False).index
 
-    # # Optional: overlay individual points
-    # sns.stripplot(
-    #     data=melted_df,
-    #     x="Feature",
-    #     y="Correlation",
-    #     color="black",
-    #     alpha=0.5
-    # )
-
-    # Labeling
-    # plt.text(-1.5, -1, "Features", fontsize=12, ha="center", va="bottom")
-    plt.xlabel("Features")
-    plt.ylabel("Absolute Correlation w/ NASA-TLX")
-    plt.xticks(rotation=90, ha="right")
-    plt.tight_layout()
-    plt.show()
-
-    # Create a figure for the box plot where the value is x and the feature is y
+    # Plot sorted box plot with overlaid individual points
     plt.figure(figsize=(10, 12))
     ax = sns.boxplot(
         data=melted_df,
-        y="Feature",  # Feature on Y-axis
-        x="Correlation",  # Correlation values on X-axis
+        y="Feature",
+        x="Correlation",
+        order=feature_order,  # Sorting applied here
         color="lightblue"
+    )
+
+    # Overlay individual points
+    sns.stripplot(
+        data=melted_df,
+        y="Feature",
+        x="Correlation",
+        order=feature_order,  # Ensure sorting is consistent
+        color="black",
+        alpha=0.5,
+        size=4  # Adjust point size if needed
     )
 
     # Set axis labels

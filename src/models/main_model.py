@@ -6,7 +6,7 @@ import src.models.model_functions as mf
 from src.models.generate_article_plots import create_heatmap_top_features, create_heatmap_top_features_annotated
 
 # make a list from '01' to '13'
-list_id = [f'{i:02d}' for i in range(6, 16)]
+list_id = [f'{i:02d}' for i in range(6, 17)]
 # exclude 10
 list_id.remove('10')
 

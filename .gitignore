@@ -7,4 +7,5 @@ __pycache__/
 
 # Large data
 data/
+eeg_analysis_plots/
 src/signal_processing/classifying_ica_components

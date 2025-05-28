@@ -407,7 +407,6 @@ def compute_band_energy(data, fs, band):
 
     return band_energy
 
-
 # Function to segment data into overlapping windows
 def segment_data(data, window_size, overlap):
     """
@@ -755,3 +754,48 @@ def plot_psd_windows(data, fs, triggers, trigger_time_stamps, window_duration, t
         fig.suptitle(f'{title} - PSD Windows (Channel {i + 1})')
         plt.tight_layout()
         plt.show()
+
+
+def show_synchronization(processor):
+    # Extract trigger indices for calibration sections
+    start_indices = np.where(processor.triggers == 28)[0]
+    end_indices = np.where(processor.triggers == 30)[0]
+
+    synchronization_dicts = {}
+
+    for i in range(2):  # Two synchronization sections
+        start_time = processor.triggers_time_stamps[start_indices[i]]
+        end_time = processor.triggers_time_stamps[end_indices[i]] + 10
+
+        # Find indices within this time range
+        mask = (processor.data_timestamps >= start_time) & (processor.data_timestamps <= end_time)
+
+        # Extract relevant data
+        sync_data = processor.data[mask]
+        sync_timestamps = processor.data_timestamps[mask]
+
+        # Find triggers within this range
+        sync_triggers = processor.triggers[start_indices[i]:end_indices[i] + 1]
+        sync_trigger_times = processor.triggers_time_stamps[start_indices[i]:end_indices[i] + 1]
+
+        # organize timestamps relative to the start time
+        sync_timestamps -= start_time
+        sync_trigger_times -= start_time
+
+        # Store in dictionary
+        synchronization_dicts[f'sync_{i + 1}'] = {
+            'data': sync_data,
+            'timestamps': sync_timestamps,
+            'trigger_times': sync_trigger_times,
+            'triggers': sync_triggers
+        }
+
+        for dic in synchronization_dicts:
+            create_plot(synchronization_dicts[dic]['data'], synchronization_dicts[dic]['timestamps'],
+                        synchronization_dicts[dic]['trigger_times'], synchronization_dicts[dic]['triggers'],
+                        f'Synchronization {dic}')
+
+
+
+
+

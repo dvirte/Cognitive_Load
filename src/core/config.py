@@ -30,6 +30,9 @@
 #    28: 'Synchronization Calibration: Start',
 #    29: 'Synchronization Calibration: Single sound',
 #    30: 'Synchronization Calibration: End',
+#    31: 'n-back training phase 1',
+#    32: 'n-back training phase 2',
+#    33: 'n-back training phase 3',
 # }
 
 
